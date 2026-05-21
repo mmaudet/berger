@@ -14,8 +14,16 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-//! Storage: the SQLite sidecar — schema migrations, connection handling,
-//! and the table repositories.
+//! Error type for the storage layer.
 
-pub mod database;
-pub mod error;
+/// Something went wrong talking to the SQLite sidecar.
+#[derive(Debug, thiserror::Error)]
+pub enum StorageError {
+    /// A SQLite operation failed.
+    #[error("database error: {0}")]
+    Sqlite(#[from] rusqlite::Error),
+
+    /// Applying the schema migrations failed.
+    #[error("schema migration failed: {0}")]
+    Migration(#[from] refinery::Error),
+}
