@@ -53,6 +53,9 @@ pub struct BergerConfig {
     /// Per-tag IMAP actions (PRD §5.5). Empty when the section is absent.
     #[serde(default)]
     pub actions: std::collections::BTreeMap<String, TagActions>,
+    /// The LLM classifier (PRD §5.3). `None` when the section is absent.
+    #[serde(default)]
+    pub llm: Option<LlmConfig>,
 }
 
 /// How to reach the upstream Bichon instance.
@@ -91,6 +94,20 @@ pub struct ImapConfig {
 
 fn default_imap_port() -> u16 {
     993
+}
+
+/// The LLM classifier endpoint (PRD §5.3) — an OpenAI-compatible
+/// chat-completions API: Mistral, Ollama, or anything compatible.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LlmConfig {
+    /// Full URL of the chat-completions endpoint.
+    pub endpoint: String,
+    /// Model name, e.g. `mistral-small-latest` or `gemma3:12b`.
+    pub model: String,
+    /// API key (Bearer). Omit for a local endpoint that needs no auth.
+    #[serde(default)]
+    pub api_key: Option<SecretString>,
 }
 
 /// One native filter rule: exactly one filter type, plus the tag it emits
@@ -246,6 +263,11 @@ impl BergerConfig {
             if let Some(webhook) = &actions.webhook {
                 require_non_empty(webhook, "action.webhook")?;
             }
+        }
+
+        if let Some(llm) = &self.llm {
+            require_non_empty(&llm.endpoint, "llm.endpoint")?;
+            require_non_empty(&llm.model, "llm.model")?;
         }
 
         Ok(())
@@ -549,6 +571,33 @@ accounts:
     #[test]
     fn an_empty_imap_host_is_rejected() {
         let yaml = VALID_YAML.replace("imap.linagora.example", "");
+        assert!(matches!(
+            BergerConfig::parse(&yaml).unwrap_err(),
+            ConfigError::Validation(_)
+        ));
+    }
+
+    #[test]
+    fn parses_the_llm_section() {
+        let yaml = format!(
+            "{VALID_YAML}\nllm:\n  endpoint: \"https://api.example/v1/chat/completions\"\n  model: \"mistral-small-latest\"\n  api_key: \"key-abc\"\n"
+        );
+        let config = BergerConfig::parse(&yaml).unwrap();
+        let llm = config.llm.unwrap();
+        assert_eq!(llm.endpoint, "https://api.example/v1/chat/completions");
+        assert_eq!(llm.model, "mistral-small-latest");
+        assert_eq!(llm.api_key.unwrap().expose(), "key-abc");
+    }
+
+    #[test]
+    fn the_llm_section_is_optional() {
+        let config = BergerConfig::parse(VALID_YAML).unwrap();
+        assert!(config.llm.is_none());
+    }
+
+    #[test]
+    fn an_llm_section_without_an_endpoint_is_rejected() {
+        let yaml = format!("{VALID_YAML}\nllm:\n  endpoint: \"\"\n  model: \"m\"\n");
         assert!(matches!(
             BergerConfig::parse(&yaml).unwrap_err(),
             ConfigError::Validation(_)
