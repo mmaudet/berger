@@ -19,6 +19,7 @@
 
 pub mod error;
 pub mod imap_target;
+pub mod resolve;
 
 use std::future::Future;
 
