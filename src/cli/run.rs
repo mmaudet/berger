@@ -25,6 +25,8 @@ use crate::actions::imap_target::ImapActionTarget;
 use crate::config::{AccountConfig, BergerConfig};
 use crate::ingest::bichon_client::BichonClient;
 use crate::ingest::poller::{Watermark, poll_account};
+use crate::llm::LlmClient;
+use crate::llm::classifier::Classifier;
 use crate::pipeline::{Pipeline, ProcessOutcome, compile_filters};
 use crate::storage::database::Database;
 
@@ -51,7 +53,23 @@ pub async fn run(config_path: &str) -> anyhow::Result<()> {
     .context("building the Bichon client")?;
     let database = Database::open(&config.database.path).context("opening the database")?;
     let filters = compile_filters(&config.filters).context("compiling the filters")?;
-    let pipeline = Pipeline::new(filters, config.actions.clone(), config_hash);
+    let classifier = match &config.llm {
+        Some(llm) => {
+            let client = LlmClient::new(
+                &llm.endpoint,
+                &llm.model,
+                llm.api_key.as_ref().map(|key| key.expose()),
+            )
+            .context("building the LLM client")?;
+            Some(Classifier::new(
+                client,
+                llm.model.clone(),
+                llm.categories.clone(),
+            ))
+        }
+        None => None,
+    };
+    let pipeline = Pipeline::new(filters, config.actions.clone(), config_hash, classifier);
 
     tracing::info!(
         accounts = config.accounts.len(),

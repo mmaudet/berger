@@ -29,9 +29,11 @@ use crate::filters::error::FilterError;
 use crate::filters::{MessageView, NativeFilter};
 use crate::ingest::source::MessageSource;
 use crate::ingest::types::Envelope;
+use crate::llm::classifier::{Classifier, ClassifyOutcome, MessageContent};
 use crate::pipeline::error::PipelineError;
 use crate::storage::database::Database;
 use crate::storage::processed_messages::ProcessedMessage;
+use crate::tags::{LLM_ERROR_TAG, classification_tags};
 
 /// A [`FilterRule`] compiled into a runnable [`NativeFilter`] together with
 /// the tag it emits when it matches.
@@ -63,6 +65,16 @@ pub fn parse_message_view(eml: &[u8]) -> MessageView {
             .map(|(name, value)| (name.to_string(), value.trim().to_string()))
             .collect(),
     }
+}
+
+/// Extracts the plain-text body of a raw RFC 822 message, for the LLM
+/// classifier. An unparseable message, or one with no text part, yields
+/// an empty string.
+fn parse_body(eml: &[u8]) -> String {
+    MessageParser::default()
+        .parse(eml)
+        .and_then(|message| message.body_text(0).map(|text| text.into_owned()))
+        .unwrap_or_default()
 }
 
 /// Compiles configured [`FilterRule`]s into runnable [`CompiledFilter`]s.
@@ -106,6 +118,22 @@ pub fn run_filters(filters: &[CompiledFilter], message: &MessageView) -> Vec<Str
     tags
 }
 
+/// Merges the native filter `tags` with the LLM classifier's `outcome`:
+/// the classification tags on success, the `llm_error` tag on failure
+/// (PRD §5.3). Tags already present are not duplicated.
+fn merge_llm_tags(mut tags: Vec<String>, outcome: &ClassifyOutcome) -> Vec<String> {
+    let llm_tags = match outcome {
+        ClassifyOutcome::Classified { classification, .. } => classification_tags(classification),
+        ClassifyOutcome::Failed => vec![LLM_ERROR_TAG.to_string()],
+    };
+    for tag in llm_tags {
+        if !tags.contains(&tag) {
+            tags.push(tag);
+        }
+    }
+    tags
+}
+
 /// The outcome of running one message through the pipeline.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProcessOutcome {
@@ -113,40 +141,45 @@ pub enum ProcessOutcome {
     AlreadyProcessed,
     /// The message was triaged.
     Processed {
-        /// Tags emitted by the native filters.
+        /// Tags emitted by the native filters and the LLM classifier.
         tags: Vec<String>,
         /// Number of IMAP actions applied.
         actions_applied: usize,
     },
 }
 
-/// The triage pipeline: the compiled filters and the action map, applied
-/// to each polled message.
+/// The triage pipeline: the compiled filters, the action map, and the
+/// optional LLM classifier, applied to each polled message.
 #[derive(Debug)]
 pub struct Pipeline {
     filters: Vec<CompiledFilter>,
     actions: BTreeMap<String, TagActions>,
     config_hash: String,
+    classifier: Option<Classifier>,
 }
 
 impl Pipeline {
-    /// Builds a pipeline from compiled filters, the action map, and a hash
-    /// of the configuration in force (recorded with every message).
+    /// Builds a pipeline from compiled filters, the action map, a hash of
+    /// the configuration in force (recorded with every message), and an
+    /// optional LLM classifier (PRD §5.3).
     pub fn new(
         filters: Vec<CompiledFilter>,
         actions: BTreeMap<String, TagActions>,
         config_hash: String,
+        classifier: Option<Classifier>,
     ) -> Self {
         Self {
             filters,
             actions,
             config_hash,
+            classifier,
         }
     }
 
     /// Processes one polled message: skips it if already seen (Bichon
-    /// coherence rule #2), otherwise downloads its EML, runs the filters,
-    /// applies the resolved actions, and records it in the ledger.
+    /// coherence rule #2), otherwise downloads its EML, runs the native
+    /// filters and the LLM classifier, applies the resolved actions, and
+    /// records it in the ledger.
     ///
     /// # Errors
     /// Returns [`PipelineError`] if downloading, an IMAP action, or a
@@ -175,7 +208,30 @@ impl Pipeline {
             .download_message(&envelope.account_id.to_string(), &envelope.id)
             .await?;
         let view = parse_message_view(&eml);
-        let tags = run_filters(&self.filters, &view);
+        let mut tags = run_filters(&self.filters, &view);
+
+        // LLM filter (PRD §5.3): classify the message and merge in its tags.
+        let mut llm_decision = None;
+        if let Some(classifier) = &self.classifier {
+            let content = MessageContent {
+                message_id: envelope.message_id.clone(),
+                from: envelope.from.clone(),
+                subject: envelope.subject.clone(),
+                body: parse_body(&eml),
+            };
+            let outcome = classifier
+                .classify(&database.llm_decisions(), &content)
+                .await?;
+            tags = merge_llm_tags(tags, &outcome);
+            if let ClassifyOutcome::Classified {
+                decision: Some(decision),
+                ..
+            } = outcome
+            {
+                llm_decision = Some(decision);
+            }
+        }
+
         let actions = resolve_actions(&tags, &self.actions);
         apply_actions(target, envelope.uid, &actions).await?;
 
@@ -191,6 +247,12 @@ impl Pipeline {
             config_hash: self.config_hash.clone(),
         })?;
 
+        // The LLM decision references processed_messages, so it is stored
+        // only once the message itself has been recorded.
+        if let Some(decision) = llm_decision {
+            database.llm_decisions().record(&decision)?;
+        }
+
         Ok(ProcessOutcome::Processed {
             actions_applied: actions.len(),
             tags,
@@ -202,6 +264,7 @@ impl Pipeline {
 mod tests {
     use super::*;
     use crate::config::HeaderMatchSpec;
+    use crate::llm::classifier::Classification;
 
     const SAMPLE_EML: &[u8] = b"From: Alice <alice@example.test>\r\nSubject: Quarterly invoice\r\nList-Unsubscribe: <mailto:unsub@example.test>\r\n\r\nBody text.\r\n";
 
@@ -234,6 +297,35 @@ mod tests {
                 .iter()
                 .any(|(name, _)| name.eq_ignore_ascii_case("List-Unsubscribe"))
         );
+    }
+
+    #[test]
+    fn parse_body_extracts_the_text_body() {
+        let body = parse_body(SAMPLE_EML);
+        assert!(body.contains("Body text."), "got: {body:?}");
+    }
+
+    #[test]
+    fn merge_llm_tags_appends_the_classification_tags() {
+        let outcome = ClassifyOutcome::Classified {
+            classification: Classification {
+                category: "work".to_string(),
+                needs_reply: true,
+                priority: 5,
+            },
+            decision: None,
+        };
+        let tags = merge_llm_tags(vec!["notif/github".to_string()], &outcome);
+        assert!(tags.contains(&"notif/github".to_string()));
+        assert!(tags.contains(&"cat/work".to_string()));
+        assert!(tags.contains(&"needs-reply".to_string()));
+        assert!(tags.contains(&"priority-high".to_string()));
+    }
+
+    #[test]
+    fn merge_llm_tags_uses_llm_error_on_failure() {
+        let tags = merge_llm_tags(Vec::new(), &ClassifyOutcome::Failed);
+        assert_eq!(tags, ["llm_error"]);
     }
 
     #[test]
