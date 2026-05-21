@@ -17,10 +17,16 @@
 //! The real [`ActionTarget`]: IMAP writeback over an `async-imap` session.
 
 use std::fmt::Debug;
+use std::sync::Arc;
 
 use async_imap::Session;
 use futures_util::TryStreamExt;
 use tokio::io::{AsyncRead, AsyncWrite};
+use tokio::net::TcpStream;
+use tokio_rustls::TlsConnector;
+use tokio_rustls::client::TlsStream;
+use tokio_rustls::rustls::pki_types::ServerName;
+use tokio_rustls::rustls::{ClientConfig, RootCertStore};
 
 use crate::actions::error::ActionError;
 use crate::actions::{ActionTarget, Flag};
@@ -28,9 +34,9 @@ use crate::actions::{ActionTarget, Flag};
 /// An [`ActionTarget`] backed by a live, authenticated IMAP session.
 ///
 /// Generic over the transport `T`, so it works over a TLS stream in
-/// production and a plain TCP stream in integration tests. Establishing
-/// the connection is the pipeline milestone's concern; [`Self::new`]
-/// takes an already-authenticated session.
+/// production and a plain TCP stream in integration tests. [`Self::connect`]
+/// opens a TLS connection; [`Self::new`] wraps an already-authenticated
+/// session.
 pub struct ImapActionTarget<T>
 where
     T: AsyncRead + AsyncWrite + Unpin + Debug + Send,
@@ -60,6 +66,54 @@ where
     /// Translates a logical, `/`-separated path onto the server hierarchy.
     fn server_path(&self, folder: &str) -> String {
         folder.replace('/', &self.separator)
+    }
+}
+
+impl ImapActionTarget<TlsStream<TcpStream>> {
+    /// Connects to an IMAP server over TLS, logs in, and wraps the session.
+    ///
+    /// # Errors
+    /// Returns [`ActionError`] if the TCP connection, the TLS handshake,
+    /// the server greeting or the login fails.
+    pub async fn connect(
+        host: &str,
+        port: u16,
+        user: &str,
+        password: &str,
+    ) -> Result<Self, ActionError> {
+        let tcp = TcpStream::connect((host, port))
+            .await
+            .map_err(|error| ActionError::Connection(error.to_string()))?;
+
+        let mut roots = RootCertStore::empty();
+        roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+        let config = ClientConfig::builder_with_provider(Arc::new(
+            tokio_rustls::rustls::crypto::ring::default_provider(),
+        ))
+        .with_safe_default_protocol_versions()
+        .map_err(|error| ActionError::Connection(error.to_string()))?
+        .with_root_certificates(roots)
+        .with_no_client_auth();
+
+        let server_name = ServerName::try_from(host.to_string())
+            .map_err(|error| ActionError::Connection(error.to_string()))?;
+        let tls = TlsConnector::from(Arc::new(config))
+            .connect(server_name, tcp)
+            .await
+            .map_err(|error| ActionError::Connection(error.to_string()))?;
+
+        let mut client = async_imap::Client::new(tls);
+        client
+            .read_response()
+            .await
+            .map_err(|error| ActionError::Connection(error.to_string()))?
+            .ok_or_else(|| ActionError::Connection("server sent no greeting".to_string()))?;
+        let session = client
+            .login(user, password)
+            .await
+            .map_err(|(error, _client)| imap_err(error))?;
+
+        Self::new(session).await
     }
 }
 
