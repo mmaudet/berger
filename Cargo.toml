@@ -8,7 +8,7 @@ description = "Open-source email triage daemon, the afew of 2026"
 repository = "https://github.com/mmaudet/berger"
 
 [dependencies]
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "net"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -22,8 +22,8 @@ async-imap = { version = "0.11.2", default-features = false, features = ["runtim
 tokio-rustls = { version = "0.26.4", default-features = false, features = ["ring", "logging", "tls12"] }
 futures-util = "0.3.32"
 mail-parser = "0.11.3"
+webpki-roots = "1.0.7"
 
 [dev-dependencies]
 testcontainers = "0.27.3"
-tokio = { version = "1", features = ["net"] }
 wiremock = "0.6"
