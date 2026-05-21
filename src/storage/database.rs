@@ -18,6 +18,7 @@
 
 use crate::storage::accounts::AccountRepository;
 use crate::storage::error::StorageError;
+use crate::storage::llm_decisions::LlmDecisionRepository;
 use crate::storage::processed_messages::ProcessedMessageRepository;
 
 mod embedded {
@@ -57,6 +58,11 @@ impl Database {
     /// Returns a repository over the `processed_messages` table.
     pub fn processed_messages(&self) -> ProcessedMessageRepository<'_> {
         ProcessedMessageRepository::new(&self.conn)
+    }
+
+    /// Returns a repository over the `llm_decisions` table.
+    pub fn llm_decisions(&self) -> LlmDecisionRepository<'_> {
+        LlmDecisionRepository::new(&self.conn)
     }
 }
 

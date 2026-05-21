@@ -20,4 +20,5 @@
 pub mod accounts;
 pub mod database;
 pub mod error;
+pub mod llm_decisions;
 pub mod processed_messages;
