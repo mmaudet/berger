@@ -14,6 +14,13 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-fn main() {
-    println!("berger v0.0.1");
+//! Berger entry point: initialise logging, parse the CLI, dispatch.
+
+use berger::cli::Cli;
+use clap::Parser;
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    berger::observability::init_tracing();
+    Cli::parse().dispatch().await
 }
