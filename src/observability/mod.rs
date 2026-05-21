@@ -13,3 +13,19 @@
 //
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+//! Observability: structured logging initialisation.
+
+use tracing_subscriber::EnvFilter;
+
+/// Initialises JSON structured logging for the process.
+///
+/// Honours the `RUST_LOG` environment variable; absent or invalid, it
+/// defaults to the `info` level (CLAUDE.md §4.2). Call once, at startup.
+pub fn init_tracing() {
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+    tracing_subscriber::fmt()
+        .json()
+        .with_env_filter(filter)
+        .init();
+}
