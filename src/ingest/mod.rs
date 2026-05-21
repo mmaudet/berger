@@ -17,6 +17,7 @@
 //! Ingestion: the read side of Berger — the Bichon REST client, the
 //! `Berger/*` folder filter, and the incremental polling watermark.
 
+pub mod bichon_client;
 pub mod error;
 pub mod folder_filter;
 pub mod source;
