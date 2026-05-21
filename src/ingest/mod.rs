@@ -18,3 +18,4 @@
 //! `Berger/*` folder filter, and the incremental polling watermark.
 
 pub mod folder_filter;
+pub mod types;
