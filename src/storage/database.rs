@@ -18,6 +18,7 @@
 
 use crate::storage::accounts::AccountRepository;
 use crate::storage::error::StorageError;
+use crate::storage::processed_messages::ProcessedMessageRepository;
 
 mod embedded {
     refinery::embed_migrations!("migrations");
@@ -51,6 +52,11 @@ impl Database {
     /// Returns a repository over the `accounts` table.
     pub fn accounts(&self) -> AccountRepository<'_> {
         AccountRepository::new(&self.conn)
+    }
+
+    /// Returns a repository over the `processed_messages` table.
+    pub fn processed_messages(&self) -> ProcessedMessageRepository<'_> {
+        ProcessedMessageRepository::new(&self.conn)
     }
 }
 
