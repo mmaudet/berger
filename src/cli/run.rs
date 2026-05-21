@@ -25,7 +25,7 @@ use crate::actions::imap_target::ImapActionTarget;
 use crate::config::{AccountConfig, BergerConfig};
 use crate::ingest::bichon_client::BichonClient;
 use crate::ingest::poller::{Watermark, poll_account};
-use crate::pipeline::{Pipeline, compile_filters};
+use crate::pipeline::{Pipeline, ProcessOutcome, compile_filters};
 use crate::storage::database::Database;
 
 /// How long to wait between poll cycles.
@@ -107,13 +107,15 @@ async fn poll_one_account(
     .await
     .with_context(|| format!("connecting to IMAP for account `{}`", account.name))?;
 
-    let mut processed = 0_usize;
+    let mut triaged = 0_usize;
+    let mut skipped = 0_usize;
     for envelope in &outcome.envelopes {
         match pipeline
             .process(envelope, db_account_id, bichon, database, &mut target)
             .await
         {
-            Ok(_) => processed += 1,
+            Ok(ProcessOutcome::Processed { .. }) => triaged += 1,
+            Ok(ProcessOutcome::AlreadyProcessed) => skipped += 1,
             Err(error) => tracing::error!(
                 account = %account.name,
                 message_id = %envelope.message_id,
@@ -130,7 +132,8 @@ async fn poll_one_account(
     tracing::info!(
         account = %account.name,
         polled = outcome.envelopes.len(),
-        processed,
+        triaged,
+        skipped,
         "poll cycle complete"
     );
     Ok(())
