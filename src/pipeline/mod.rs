@@ -16,11 +16,22 @@
 
 //! Pipeline: turning a polled message into tags and applied actions.
 
+pub mod error;
+
+use std::collections::BTreeMap;
+
 use mail_parser::MessageParser;
 
-use crate::config::FilterRule;
+use crate::actions::resolve::resolve_actions;
+use crate::actions::{ActionTarget, apply_actions};
+use crate::config::{FilterRule, TagActions};
 use crate::filters::error::FilterError;
 use crate::filters::{MessageView, NativeFilter};
+use crate::ingest::source::MessageSource;
+use crate::ingest::types::Envelope;
+use crate::pipeline::error::PipelineError;
+use crate::storage::database::Database;
+use crate::storage::processed_messages::ProcessedMessage;
 
 /// A [`FilterRule`] compiled into a runnable [`NativeFilter`] together with
 /// the tag it emits when it matches.
@@ -93,6 +104,98 @@ pub fn run_filters(filters: &[CompiledFilter], message: &MessageView) -> Vec<Str
         }
     }
     tags
+}
+
+/// The outcome of running one message through the pipeline.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProcessOutcome {
+    /// The message had already been processed; nothing was done (rule #2).
+    AlreadyProcessed,
+    /// The message was triaged.
+    Processed {
+        /// Tags emitted by the native filters.
+        tags: Vec<String>,
+        /// Number of IMAP actions applied.
+        actions_applied: usize,
+    },
+}
+
+/// The triage pipeline: the compiled filters and the action map, applied
+/// to each polled message.
+#[derive(Debug)]
+pub struct Pipeline {
+    filters: Vec<CompiledFilter>,
+    actions: BTreeMap<String, TagActions>,
+    config_hash: String,
+}
+
+impl Pipeline {
+    /// Builds a pipeline from compiled filters, the action map, and a hash
+    /// of the configuration in force (recorded with every message).
+    pub fn new(
+        filters: Vec<CompiledFilter>,
+        actions: BTreeMap<String, TagActions>,
+        config_hash: String,
+    ) -> Self {
+        Self {
+            filters,
+            actions,
+            config_hash,
+        }
+    }
+
+    /// Processes one polled message: skips it if already seen (Bichon
+    /// coherence rule #2), otherwise downloads its EML, runs the filters,
+    /// applies the resolved actions, and records it in the ledger.
+    ///
+    /// # Errors
+    /// Returns [`PipelineError`] if downloading, an IMAP action, or a
+    /// storage operation fails. A message is recorded as processed only
+    /// after its actions have been applied.
+    pub async fn process<S, T>(
+        &self,
+        envelope: &Envelope,
+        account_id: i64,
+        source: &S,
+        database: &Database,
+        target: &mut T,
+    ) -> Result<ProcessOutcome, PipelineError>
+    where
+        S: MessageSource,
+        T: ActionTarget,
+    {
+        if database
+            .processed_messages()
+            .is_already_processed(&envelope.message_id)?
+        {
+            return Ok(ProcessOutcome::AlreadyProcessed);
+        }
+
+        let eml = source
+            .download_message(&envelope.account_id.to_string(), &envelope.id)
+            .await?;
+        let view = parse_message_view(&eml);
+        let tags = run_filters(&self.filters, &view);
+        let actions = resolve_actions(&tags, &self.actions);
+        apply_actions(target, envelope.uid, &actions).await?;
+
+        database.processed_messages().record(&ProcessedMessage {
+            message_id: envelope.message_id.clone(),
+            account_id,
+            bichon_uri: None,
+            subject: Some(envelope.subject.clone()),
+            from_email: Some(envelope.from.clone()),
+            from_name: None,
+            date: Some(envelope.date),
+            berger_version: env!("CARGO_PKG_VERSION").to_string(),
+            config_hash: self.config_hash.clone(),
+        })?;
+
+        Ok(ProcessOutcome::Processed {
+            actions_applied: actions.len(),
+            tags,
+        })
+    }
 }
 
 #[cfg(test)]
