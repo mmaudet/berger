@@ -21,6 +21,7 @@ regex = "1.12.3"
 async-imap = { version = "0.11.2", default-features = false, features = ["runtime-tokio", "tokio"] }
 tokio-rustls = { version = "0.26.4", default-features = false, features = ["ring", "logging", "tls12"] }
 futures-util = "0.3.32"
+mail-parser = "0.11.3"
 
 [dev-dependencies]
 testcontainers = "0.27.3"
