@@ -73,6 +73,24 @@ pub struct DatabaseConfig {
 pub struct AccountConfig {
     pub name: String,
     pub bichon_account_id: String,
+    /// Where Berger writes this account's triage actions.
+    pub imap: ImapConfig,
+}
+
+/// How to reach one account's IMAP server, for writeback.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ImapConfig {
+    pub host: String,
+    /// IMAPS port; defaults to 993.
+    #[serde(default = "default_imap_port")]
+    pub port: u16,
+    pub user: String,
+    pub password: SecretString,
+}
+
+fn default_imap_port() -> u16 {
+    993
 }
 
 /// One native filter rule: exactly one filter type, plus the tag it emits
@@ -177,6 +195,9 @@ impl BergerConfig {
         for account in &self.accounts {
             require_non_empty(&account.name, "account.name")?;
             require_non_empty(&account.bichon_account_id, "account.bichon_account_id")?;
+            require_non_empty(&account.imap.host, "account.imap.host")?;
+            require_non_empty(&account.imap.user, "account.imap.user")?;
+            require_non_empty(account.imap.password.expose(), "account.imap.password")?;
             if !seen.insert(account.name.as_str()) {
                 return Err(ConfigError::Validation(format!(
                     "duplicate account name `{}`",
@@ -271,8 +292,16 @@ database:
 accounts:
   - name: "LINAGORA"
     bichon_account_id: "8525922389589073"
+    imap:
+      host: "imap.linagora.example"
+      user: "berger"
+      password: "imap-secret"
   - name: "Gmail"
     bichon_account_id: "1417038252461348"
+    imap:
+      host: "imap.gmail.com"
+      user: "berger@gmail.com"
+      password: "imap-secret-2"
 "#;
 
     #[test]
@@ -332,12 +361,16 @@ accounts:
 
     #[test]
     fn a_config_with_no_accounts_is_rejected() {
-        let yaml = VALID_YAML.replace(
-            "accounts:\n  - name: \"LINAGORA\"\n    bichon_account_id: \"8525922389589073\"\n  - name: \"Gmail\"\n    bichon_account_id: \"1417038252461348\"\n",
-            "accounts: []\n",
-        );
+        let yaml = "
+bichon:
+  base_url: \"https://bichon.example\"
+  api_token: \"tok\"
+database:
+  path: \"berger.db\"
+accounts: []
+";
         assert!(matches!(
-            BergerConfig::parse(&yaml).unwrap_err(),
+            BergerConfig::parse(yaml).unwrap_err(),
             ConfigError::Validation(_)
         ));
     }
@@ -392,6 +425,10 @@ database:
 accounts:
   - name: "LINAGORA"
     bichon_account_id: "111"
+    imap:
+      host: "imap.example"
+      user: "berger"
+      password: "pw"
 filters:
   - sender_in: ["notifications@github.com"]
     tag: notif/github
@@ -478,6 +515,43 @@ actions:
         assert!(matches!(
             BergerConfig::parse(&yaml).unwrap_err(),
             ConfigError::Parse(_)
+        ));
+    }
+
+    #[test]
+    fn parses_account_imap_settings() {
+        let config = BergerConfig::parse(VALID_YAML).unwrap();
+        let imap = &config.accounts[0].imap;
+        assert_eq!(imap.host, "imap.linagora.example");
+        assert_eq!(imap.port, 993);
+        assert_eq!(imap.user, "berger");
+        assert_eq!(imap.password.expose(), "imap-secret");
+    }
+
+    #[test]
+    fn an_account_without_imap_is_rejected() {
+        let yaml = "
+bichon:
+  base_url: \"https://bichon.example\"
+  api_token: \"tok\"
+database:
+  path: \"berger.db\"
+accounts:
+  - name: \"LINAGORA\"
+    bichon_account_id: \"111\"
+";
+        assert!(matches!(
+            BergerConfig::parse(yaml).unwrap_err(),
+            ConfigError::Parse(_)
+        ));
+    }
+
+    #[test]
+    fn an_empty_imap_host_is_rejected() {
+        let yaml = VALID_YAML.replace("imap.linagora.example", "");
+        assert!(matches!(
+            BergerConfig::parse(&yaml).unwrap_err(),
+            ConfigError::Validation(_)
         ));
     }
 }
