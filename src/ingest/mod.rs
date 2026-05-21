@@ -20,5 +20,6 @@
 pub mod bichon_client;
 pub mod error;
 pub mod folder_filter;
+pub mod poller;
 pub mod source;
 pub mod types;
