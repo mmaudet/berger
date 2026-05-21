@@ -13,3 +13,8 @@
 //
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+//! Ingestion: the read side of Berger — the Bichon REST client, the
+//! `Berger/*` folder filter, and the incremental polling watermark.
+
+pub mod folder_filter;
