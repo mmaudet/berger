@@ -108,6 +108,9 @@ pub struct LlmConfig {
     /// API key (Bearer). Omit for a local endpoint that needs no auth.
     #[serde(default)]
     pub api_key: Option<SecretString>,
+    /// Category vocabulary offered to the model; free-form when empty.
+    #[serde(default)]
+    pub categories: Vec<String>,
 }
 
 /// One native filter rule: exactly one filter type, plus the tag it emits
@@ -602,5 +605,14 @@ accounts:
             BergerConfig::parse(&yaml).unwrap_err(),
             ConfigError::Validation(_)
         ));
+    }
+
+    #[test]
+    fn the_llm_section_parses_a_category_vocabulary() {
+        let yaml = format!(
+            "{VALID_YAML}\nllm:\n  endpoint: \"https://x/v1\"\n  model: \"m\"\n  categories: [\"work\", \"perso\"]\n"
+        );
+        let config = BergerConfig::parse(&yaml).unwrap();
+        assert_eq!(config.llm.unwrap().categories, ["work", "perso"]);
     }
 }
