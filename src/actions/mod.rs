@@ -18,6 +18,7 @@
 //! consolidated application of a message's per-tag actions (PRD §5.5).
 
 pub mod error;
+pub mod imap_target;
 
 use std::future::Future;
 
