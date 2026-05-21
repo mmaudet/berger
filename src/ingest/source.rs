@@ -41,4 +41,11 @@ pub trait MessageSource {
         &self,
         request: EmailSearchRequest,
     ) -> impl Future<Output = Result<DataPage<Envelope>, IngestError>> + Send;
+
+    /// Downloads the raw RFC 822 bytes of one message.
+    fn download_message(
+        &self,
+        account_id: &str,
+        envelope_id: &str,
+    ) -> impl Future<Output = Result<Vec<u8>, IngestError>> + Send;
 }

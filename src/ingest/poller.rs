@@ -172,6 +172,14 @@ mod tests {
                 .unwrap_or_else(empty_page);
             Ok(page)
         }
+
+        async fn download_message(
+            &self,
+            _account_id: &str,
+            _envelope_id: &str,
+        ) -> Result<Vec<u8>, IngestError> {
+            Ok(Vec::new())
+        }
     }
 
     fn empty_page() -> DataPage<Envelope> {

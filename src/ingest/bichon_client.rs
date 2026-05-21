@@ -83,29 +83,6 @@ impl BichonClient {
             Err(map_error_body(status, body))
         }
     }
-
-    /// Downloads the raw RFC 822 message (the `.eml`) for one envelope.
-    ///
-    /// # Errors
-    /// Returns [`IngestError`] if the request fails or Bichon answers with
-    /// a non-success status.
-    pub async fn download_message(
-        &self,
-        account_id: &str,
-        envelope_id: &str,
-    ) -> Result<Vec<u8>, IngestError> {
-        let url = format!(
-            "{}/api/v1/download-message/{account_id}/{envelope_id}",
-            self.base_url
-        );
-        let response = self.http.get(url).send().await?;
-        let status = response.status();
-        if status.is_success() {
-            Ok(response.bytes().await?.to_vec())
-        } else {
-            Err(map_error_body(status, response.text().await?))
-        }
-    }
 }
 
 /// Maps a non-success Bichon response onto the matching [`IngestError`]:
@@ -137,6 +114,24 @@ impl MessageSource for BichonClient {
         let url = format!("{}/api/v1/search-messages", self.base_url);
         let response = self.http.post(url).json(&request).send().await?;
         self.read_json(response).await
+    }
+
+    async fn download_message(
+        &self,
+        account_id: &str,
+        envelope_id: &str,
+    ) -> Result<Vec<u8>, IngestError> {
+        let url = format!(
+            "{}/api/v1/download-message/{account_id}/{envelope_id}",
+            self.base_url
+        );
+        let response = self.http.get(url).send().await?;
+        let status = response.status();
+        if status.is_success() {
+            Ok(response.bytes().await?.to_vec())
+        } else {
+            Err(map_error_body(status, response.text().await?))
+        }
     }
 }
 
