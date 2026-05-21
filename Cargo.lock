@@ -49,6 +49,7 @@ name = "berger"
 version = "0.0.1"
 dependencies = [
  "refinery",
+ "regex",
  "reqwest",
  "rusqlite",
  "serde",

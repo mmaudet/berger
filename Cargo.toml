@@ -17,6 +17,7 @@ tracing = "0.1"
 refinery = { version = "0.9.1", features = ["rusqlite"] }
 rusqlite = { version = "0.38", features = ["bundled"] }
 serde_yaml_ng = "0.10.0"
+regex = "1.12.3"
 
 [dev-dependencies]
 wiremock = "0.6"
