@@ -12,3 +12,6 @@ berger.db*
 
 # Environment files (may carry secrets — never commit)
 *.env
+
+# Personal runtime config (the committed reference is berger.example.yaml)
+/berger.yaml

@@ -75,8 +75,8 @@ pub struct PollOutcome {
 }
 
 /// Polls one account once: pages through every message whose `Date:` is at
-/// or after `watermark - SAFETY_MARGIN_MS`, drops Berger's own folders, and
-/// returns the new envelopes together with the advanced watermark.
+/// or after `watermark - SAFETY_MARGIN_MS`, keeps only `INBOX` messages
+/// (PRD §5.1), and returns them together with the advanced watermark.
 pub async fn poll_account<S: MessageSource>(
     source: &S,
     account_id: u64,
@@ -113,9 +113,13 @@ pub async fn poll_account<S: MessageSource>(
         None => watermark,
     };
 
-    // Bichon coherence rule #1: never hand Berger's own folders downstream.
-    envelopes
-        .retain(|envelope| !is_berger_folder(envelope.mailbox_name.as_deref().unwrap_or_default()));
+    // Rule #1 (CLAUDE.md §3.2): never hand Berger's own folders downstream.
+    // INBOX scope (PRD §5.1): triage incoming mail only — not Sent, Trash,
+    // Spam or the user's own subfolders.
+    envelopes.retain(|envelope| {
+        let mailbox = envelope.mailbox_name.as_deref().unwrap_or_default();
+        !is_berger_folder(mailbox) && mailbox.eq_ignore_ascii_case("INBOX")
+    });
 
     tracing::debug!(
         account_id,
@@ -278,6 +282,19 @@ mod tests {
             envelope("<inbox@x>", 10, "INBOX"),
             envelope("<copied@x>", 20, "Berger/cat-work"),
             envelope("<moved@x>", 30, "INBOX.Berger.junk"),
+        ])]);
+        let outcome = poll_account(&source, 1, Watermark::at(0)).await.unwrap();
+        assert_eq!(outcome.envelopes.len(), 1);
+        assert_eq!(outcome.envelopes[0].message_id, "<inbox@x>");
+    }
+
+    #[tokio::test]
+    async fn excludes_messages_outside_inbox() {
+        // Berger triages incoming mail only — not Sent, Trash, Spam, etc.
+        let source = FakeSource::new(vec![page(vec![
+            envelope("<inbox@x>", 10, "INBOX"),
+            envelope("<sent@x>", 20, "Sent"),
+            envelope("<trash@x>", 30, "Trash"),
         ])]);
         let outcome = poll_account(&source, 1, Watermark::at(0)).await.unwrap();
         assert_eq!(outcome.envelopes.len(), 1);
