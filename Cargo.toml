@@ -23,6 +23,8 @@ tokio-rustls = { version = "0.26.4", default-features = false, features = ["ring
 futures-util = "0.3.32"
 mail-parser = "0.11.3"
 webpki-roots = "1.0.7"
+clap = { version = "4.6.1", features = ["derive"] }
+anyhow = "1.0.102"
 
 [dev-dependencies]
 testcontainers = "0.27.3"
