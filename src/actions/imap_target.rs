@@ -44,13 +44,16 @@ impl<T> ImapActionTarget<T>
 where
     T: AsyncRead + AsyncWrite + Unpin + Debug + Send,
 {
-    /// Wraps an authenticated IMAP session, discovering the server's
-    /// mailbox hierarchy separator.
+    /// Wraps an authenticated IMAP session: discovers the server's mailbox
+    /// hierarchy separator and selects `INBOX`, so that the `UID COPY`,
+    /// `UID MOVE` and `UID STORE` commands act on the triaged message.
     ///
     /// # Errors
-    /// Returns [`ActionError`] if the separator cannot be discovered.
+    /// Returns [`ActionError`] if the separator cannot be discovered or
+    /// `INBOX` cannot be selected.
     pub async fn new(mut session: Session<T>) -> Result<Self, ActionError> {
         let separator = discover_separator(&mut session).await?;
+        session.select("INBOX").await.map_err(imap_err)?;
         Ok(Self { session, separator })
     }
 
