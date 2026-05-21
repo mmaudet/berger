@@ -16,6 +16,7 @@
 
 //! The SQLite sidecar: connection, pragmas, and schema migrations.
 
+use crate::storage::accounts::AccountRepository;
 use crate::storage::error::StorageError;
 
 mod embedded {
@@ -45,6 +46,11 @@ impl Database {
     /// Borrows the underlying connection, for use by the repositories.
     pub fn connection(&self) -> &rusqlite::Connection {
         &self.conn
+    }
+
+    /// Returns a repository over the `accounts` table.
+    pub fn accounts(&self) -> AccountRepository<'_> {
+        AccountRepository::new(&self.conn)
     }
 }
 

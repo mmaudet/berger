@@ -17,5 +17,6 @@
 //! Storage: the SQLite sidecar — schema migrations, connection handling,
 //! and the table repositories.
 
+pub mod accounts;
 pub mod database;
 pub mod error;
