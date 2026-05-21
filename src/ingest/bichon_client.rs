@@ -79,15 +79,47 @@ impl BichonClient {
         let body = response.text().await?;
         if status.is_success() {
             Ok(serde_json::from_str(&body)?)
-        } else if let Ok(api_error) = serde_json::from_str::<ApiError>(&body) {
-            Err(IngestError::Api {
-                status,
-                code: api_error.code,
-                message: api_error.message,
-            })
         } else {
-            Err(IngestError::Unexpected { status, body })
+            Err(map_error_body(status, body))
         }
+    }
+
+    /// Downloads the raw RFC 822 message (the `.eml`) for one envelope.
+    ///
+    /// # Errors
+    /// Returns [`IngestError`] if the request fails or Bichon answers with
+    /// a non-success status.
+    pub async fn download_message(
+        &self,
+        account_id: &str,
+        envelope_id: &str,
+    ) -> Result<Vec<u8>, IngestError> {
+        let url = format!(
+            "{}/api/v1/download-message/{account_id}/{envelope_id}",
+            self.base_url
+        );
+        let response = self.http.get(url).send().await?;
+        let status = response.status();
+        if status.is_success() {
+            Ok(response.bytes().await?.to_vec())
+        } else {
+            Err(map_error_body(status, response.text().await?))
+        }
+    }
+}
+
+/// Maps a non-success Bichon response onto the matching [`IngestError`]:
+/// a structured `ApiError` body becomes [`IngestError::Api`], anything
+/// else [`IngestError::Unexpected`].
+fn map_error_body(status: reqwest::StatusCode, body: String) -> IngestError {
+    if let Ok(api_error) = serde_json::from_str::<ApiError>(&body) {
+        IngestError::Api {
+            status,
+            code: api_error.code,
+            message: api_error.message,
+        }
+    } else {
+        IngestError::Unexpected { status, body }
     }
 }
 
@@ -275,5 +307,40 @@ mod tests {
         let error = client.list_accounts().await.unwrap_err();
 
         assert!(matches!(error, IngestError::Decode(_)));
+    }
+
+    #[tokio::test]
+    async fn download_message_returns_the_raw_eml() {
+        let server = MockServer::start().await;
+        let eml: &[u8] = b"From: s@example.test\r\nSubject: Hi\r\n\r\nBody.\r\n";
+        Mock::given(method("GET"))
+            .and(path("/api/v1/download-message/42/e1"))
+            .and(header("authorization", "Bearer tok"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(eml.to_vec()))
+            .mount(&server)
+            .await;
+
+        let client = BichonClient::new(server.uri(), "tok").unwrap();
+        let bytes = client.download_message("42", "e1").await.unwrap();
+
+        assert_eq!(bytes, eml);
+    }
+
+    #[tokio::test]
+    async fn download_message_reports_an_error_status() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v1/download-message/42/missing"))
+            .respond_with(
+                ResponseTemplate::new(404)
+                    .set_body_json(json!({"code": 30000, "message": "not found"})),
+            )
+            .mount(&server)
+            .await;
+
+        let client = BichonClient::new(server.uri(), "tok").unwrap();
+        let error = client.download_message("42", "missing").await.unwrap_err();
+
+        assert!(matches!(error, IngestError::Api { .. }));
     }
 }
