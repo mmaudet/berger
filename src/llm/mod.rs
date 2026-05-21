@@ -16,6 +16,7 @@
 
 //! LLM client: an OpenAI-compatible chat-completions client (PRD §5.3).
 
+pub mod classifier;
 pub mod error;
 
 use serde::{Deserialize, Serialize};
