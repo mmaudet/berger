@@ -33,3 +33,4 @@ pub mod folders;
 pub mod headers;
 pub mod runner;
 pub mod source;
+pub mod suggester;
