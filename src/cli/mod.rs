@@ -23,6 +23,7 @@ pub mod dry_run;
 pub mod explain;
 pub mod export_thunderbird;
 mod run;
+pub mod scan;
 pub mod status;
 
 /// The Berger command-line interface.
@@ -82,6 +83,22 @@ enum Command {
         #[arg(long)]
         output: Option<String>,
     },
+
+    /// Scan the inbox read-only and report its recurring patterns —
+    /// frequent senders, domains and two-way contacts — as a starting
+    /// point for writing the configuration.
+    Scan {
+        /// Path to the configuration file.
+        #[arg(long, default_value = "berger.yaml")]
+        config: String,
+        /// How far back to scan, as a number of days, e.g. `7d` or `30d`.
+        #[arg(long, default_value = "30d")]
+        since: String,
+        /// Restrict the scan to one configured account by name; defaults
+        /// to every configured account.
+        #[arg(long)]
+        account: Option<String>,
+    },
 }
 
 impl Cli {
@@ -100,6 +117,11 @@ impl Cli {
                 account,
                 output,
             } => export_thunderbird::run(&config, account.as_deref(), output.as_deref()),
+            Command::Scan {
+                config,
+                since,
+                account,
+            } => scan::run(&config, &since, account.as_deref()).await,
         }
     }
 }
