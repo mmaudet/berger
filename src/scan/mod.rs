@@ -27,3 +27,4 @@
 //! mutating method, so the read-only guarantee holds at compile time.
 
 pub mod analyzers;
+pub mod source;
