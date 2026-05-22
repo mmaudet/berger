@@ -18,6 +18,7 @@
 
 use clap::{Parser, Subcommand};
 
+pub mod export_thunderbird;
 mod run;
 
 /// The Berger command-line interface.
@@ -37,6 +38,20 @@ enum Command {
         #[arg(long, default_value = "berger.yaml")]
         config: String,
     },
+
+    /// Export the `actions:` configuration as a Mozilla Thunderbird
+    /// `msgFilterRules.dat` ruleset, printed to stdout.
+    ExportThunderbird {
+        /// Path to the configuration file.
+        #[arg(long, default_value = "berger.yaml")]
+        config: String,
+        /// Account name to export rules for; defaults to the first account.
+        #[arg(long)]
+        account: Option<String>,
+        /// File to write the ruleset to; prints to stdout when omitted.
+        #[arg(long)]
+        output: Option<String>,
+    },
 }
 
 impl Cli {
@@ -47,6 +62,11 @@ impl Cli {
     pub async fn dispatch(self) -> anyhow::Result<()> {
         match self.command {
             Command::Run { config } => run::run(&config).await,
+            Command::ExportThunderbird {
+                config,
+                account,
+                output,
+            } => export_thunderbird::run(&config, account.as_deref(), output.as_deref()),
         }
     }
 }
