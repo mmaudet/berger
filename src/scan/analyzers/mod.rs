@@ -14,22 +14,5 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-//! Berger — open-source email triage daemon.
-//!
-//! This crate is built as a library plus a thin binary: every module of the
-//! daemon lives here so it can be exercised by the integration tests in
-//! `tests/`. The `berger` binary (`src/main.rs`) is only an entry point.
-
-pub mod actions;
-pub mod cli;
-pub mod config;
-pub mod filters;
-pub mod ingest;
-pub mod llm;
-pub mod observability;
-pub mod pipeline;
-pub mod scan;
-pub mod storage;
-pub mod tags;
-pub mod webhooks;
-pub mod webui;
+//! Per-dimension analyzers (PRD v1.1 §4.2): each module computes one
+//! family of statistics over the scanned envelopes.

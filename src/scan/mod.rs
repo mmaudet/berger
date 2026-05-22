@@ -14,22 +14,16 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-//! Berger — open-source email triage daemon.
+//! Inbox scan (PRD v1.1): a strictly read-only analysis of the inbox.
 //!
-//! This crate is built as a library plus a thin binary: every module of the
-//! daemon lives here so it can be exercised by the integration tests in
-//! `tests/`. The `berger` binary (`src/main.rs`) is only an entry point.
+//! `berger scan` observes the user's inbox over a recent window, measures
+//! the recurring patterns in it — frequent senders, domains, newsletters,
+//! notification services, ... — and proposes a starting `berger.yaml` for
+//! the user to review and merge by hand.
+//!
+//! The scan is orthogonal to the triage pipeline: it never applies an IMAP
+//! action, never calls the LLM, and never reads a message body. It reads
+//! exclusively through [`source::ReadOnlyMessageSource`], a trait with no
+//! mutating method, so the read-only guarantee holds at compile time.
 
-pub mod actions;
-pub mod cli;
-pub mod config;
-pub mod filters;
-pub mod ingest;
-pub mod llm;
-pub mod observability;
-pub mod pipeline;
-pub mod scan;
-pub mod storage;
-pub mod tags;
-pub mod webhooks;
-pub mod webui;
+pub mod analyzers;
