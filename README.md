@@ -35,10 +35,8 @@ the classification to tags, then the per-tag IMAP actions and webhooks.
 ## Status
 
 Berger **v0.2.1** is the current release: v0.1.0 shipped the triage daemon,
-and v0.2.0 added the read-only `berger scan` configuration bootstrapper. The
-specification is in [`docs/PRD.md`](docs/PRD.md) and
-[`docs/PRD-v1.1.md`](docs/PRD-v1.1.md); release notes are in the
-[changelog](CHANGELOG.md).
+and v0.2.0 added the read-only `berger scan` configuration bootstrapper.
+Release notes are in the [changelog](CHANGELOG.md).
 
 ## Quickstart
 
@@ -194,9 +192,8 @@ Berger is developed in the open. Contributions are welcome.
 
 - **Issues and pull requests** go to
   [github.com/mmaudet/berger](https://github.com/mmaudet/berger).
-- **Scope.** Berger v1 has a deliberately tight scope; see
-  [`docs/PRD.md`](docs/PRD.md) §6 for what is explicitly out. Please open an
-  issue to discuss a feature before sending a PR for it.
+- **Scope.** Berger v1 has a deliberately tight scope. Please open an issue
+  to discuss a feature before sending a PR for it.
 - **Commits.** Follow [Conventional Commits](https://www.conventionalcommits.org)
   (`feat:`, `fix:`, `docs:`, `test:`, `chore:`). Keep commits small and
   atomic — one intention each.
