@@ -29,11 +29,13 @@ use crate::filters::error::FilterError;
 use crate::filters::{MessageView, NativeFilter};
 use crate::ingest::source::MessageSource;
 use crate::ingest::types::Envelope;
-use crate::llm::classifier::{Classifier, ClassifyOutcome, MessageContent};
+use crate::llm::classifier::{Classification, Classifier, ClassifyOutcome, MessageContent};
 use crate::pipeline::error::PipelineError;
 use crate::storage::database::Database;
 use crate::storage::processed_messages::ProcessedMessage;
 use crate::tags::{LLM_ERROR_TAG, classification_tags};
+use crate::webhooks::emitter::WebhookEmitter;
+use crate::webhooks::payload::{PayloadContext, WebhookPayload};
 
 /// A [`FilterRule`] compiled into a runnable [`NativeFilter`] together with
 /// the tag it emits when it matches.
@@ -145,23 +147,31 @@ pub enum ProcessOutcome {
         tags: Vec<String>,
         /// Number of IMAP actions applied.
         actions_applied: usize,
+        /// Number of webhooks emitted (PRD §5.6).
+        webhooks_emitted: usize,
     },
 }
 
-/// The triage pipeline: the compiled filters, the action map, and the
-/// optional LLM classifier, applied to each polled message.
+/// The triage pipeline: the compiled filters, the action map, the optional
+/// LLM classifier, and the optional webhook emitter, applied to each polled
+/// message.
 #[derive(Debug)]
 pub struct Pipeline {
     filters: Vec<CompiledFilter>,
     actions: BTreeMap<String, TagActions>,
     config_hash: String,
     classifier: Option<Classifier>,
+    webhooks: Option<WebhookEmitter>,
+    bichon_base_url: String,
 }
 
 impl Pipeline {
     /// Builds a pipeline from compiled filters, the action map, a hash of
     /// the configuration in force (recorded with every message), and an
     /// optional LLM classifier (PRD §5.3).
+    ///
+    /// Webhook emission is off by default; attach it with
+    /// [`with_webhooks`](Pipeline::with_webhooks).
     pub fn new(
         filters: Vec<CompiledFilter>,
         actions: BTreeMap<String, TagActions>,
@@ -173,7 +183,19 @@ impl Pipeline {
             actions,
             config_hash,
             classifier,
+            webhooks: None,
+            bichon_base_url: String::new(),
         }
+    }
+
+    /// Attaches a [`WebhookEmitter`] so a fired tag's `webhook:` action
+    /// POSTs the canonical event (PRD §5.6). `bichon_base_url` builds the
+    /// payload's `bichon_message_uri`.
+    #[must_use]
+    pub fn with_webhooks(mut self, emitter: WebhookEmitter, bichon_base_url: String) -> Self {
+        self.webhooks = Some(emitter);
+        self.bichon_base_url = bichon_base_url;
+        self
     }
 
     /// Processes one polled message: skips it if already seen (Bichon
@@ -212,6 +234,7 @@ impl Pipeline {
 
         // LLM filter (PRD §5.3): classify the message and merge in its tags.
         let mut llm_decision = None;
+        let mut classification = None;
         if let Some(classifier) = &self.classifier {
             let content = MessageContent {
                 message_id: envelope.message_id.clone(),
@@ -224,11 +247,12 @@ impl Pipeline {
                 .await?;
             tags = merge_llm_tags(tags, &outcome);
             if let ClassifyOutcome::Classified {
-                decision: Some(decision),
-                ..
+                classification: produced,
+                decision,
             } = outcome
             {
-                llm_decision = Some(decision);
+                classification = Some(produced);
+                llm_decision = decision;
             }
         }
 
@@ -253,11 +277,115 @@ impl Pipeline {
             database.llm_decisions().record(&decision)?;
         }
 
+        // Webhooks (PRD §5.6): emitted last, since webhook_emissions has a
+        // foreign key onto the message just recorded above.
+        let webhooks_emitted = self
+            .emit_webhooks(envelope, &eml, &tags, classification.as_ref(), database)
+            .await;
+
         Ok(ProcessOutcome::Processed {
             actions_applied: actions.len(),
             tags,
+            webhooks_emitted,
         })
     }
+
+    /// Emits every webhook a fired tag's `webhook:` action references, for
+    /// a message that has just been recorded (PRD §5.6).
+    ///
+    /// Returns the count of webhooks for which a POST was attempted. Webhook
+    /// delivery is fire-and-forget: a failed POST — or a failure to even
+    /// build the payload — is logged, never propagated, so it cannot fail
+    /// the triage of a message whose IMAP actions already succeeded.
+    async fn emit_webhooks(
+        &self,
+        envelope: &Envelope,
+        eml: &[u8],
+        tags: &[String],
+        classification: Option<&Classification>,
+        database: &Database,
+    ) -> usize {
+        let Some(emitter) = &self.webhooks else {
+            return 0;
+        };
+        if emitter.is_empty() {
+            return 0;
+        }
+
+        // The distinct webhook names referenced by the message's tags,
+        // collected in tag (declaration) order.
+        let mut names: Vec<&str> = Vec::new();
+        for tag in tags {
+            if let Some(name) = self
+                .actions
+                .get(tag)
+                .and_then(|tag_actions| tag_actions.webhook.as_deref())
+                && !names.contains(&name)
+            {
+                names.push(name);
+            }
+        }
+        if names.is_empty() {
+            return 0;
+        }
+
+        let payload = WebhookPayload::build(
+            &PayloadContext {
+                envelope,
+                eml,
+                tags,
+                filters_matched: tags,
+                classification,
+                bichon_base_url: &self.bichon_base_url,
+            },
+            now_epoch_ms(),
+        );
+
+        let mut emitted = 0;
+        for name in names {
+            // A webhook's own `when:` filter can narrow which tags fire it.
+            match emitter.webhook(name) {
+                Some(webhook) if !webhook.fires_for(tags) => {
+                    tracing::debug!(
+                        webhook = %name,
+                        message_id = %envelope.message_id,
+                        "webhook skipped: its `when:` filter excludes this message"
+                    );
+                    continue;
+                }
+                None => {
+                    tracing::warn!(
+                        webhook = %name,
+                        message_id = %envelope.message_id,
+                        "a tag action references a webhook absent from the configuration"
+                    );
+                    continue;
+                }
+                Some(_) => {}
+            }
+            match emitter.emit(name, &payload, database).await {
+                Ok(_) => emitted += 1,
+                Err(error) => tracing::error!(
+                    webhook = %name,
+                    message_id = %envelope.message_id,
+                    error = %error,
+                    "failed to emit a webhook"
+                ),
+            }
+        }
+        emitted
+    }
+}
+
+/// The current time as epoch milliseconds, for stamping a webhook payload.
+fn now_epoch_ms() -> i64 {
+    i64::try_from(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|elapsed| elapsed.as_millis())
+            .unwrap_or(0),
+    )
+    .unwrap_or(i64::MAX)
 }
 
 #[cfg(test)]
