@@ -3,19 +3,20 @@
 # Copy this file to `berger.yaml` and edit it for your setup. Every section
 # is documented in full in docs/yaml.md.
 #
-# Secrets (API tokens, IMAP passwords) MUST NOT be written in clear text.
-# Use ${VAR} placeholders: Berger substitutes them from the process
-# environment at startup. With Docker, put the values in a gitignored .env
-# file; under systemd, in an EnvironmentFile. An unset ${VAR} is a fatal
-# startup error — Berger never falls back to an empty value.
+# Everything that changes from one deployment to the next — URLs, hosts,
+# accounts and credentials — is interpolated from the environment. Berger
+# reads the values at startup; a placeholder whose variable is unset is a
+# fatal error. Copy `.env.example` to `.env`, fill it in, and keep `.env`
+# out of version control. Docker compose loads `.env` automatically; under
+# systemd, point an EnvironmentFile at it.
 
 # --- Bichon -----------------------------------------------------------------
 # The upstream archiver Berger reads from. Berger never touches IMAP for
 # reading — every message comes through Bichon's REST API. See
 # docs/bichon-setup.md for how to configure Bichon itself.
 bichon:
-  base_url: "https://bichon.example.com"   # no trailing slash needed
-  api_token: "${BICHON_API_KEY}"           # Bearer token for Bichon's API
+  base_url: "${BICHON_BASE_URL}"           # no trailing slash needed
+  api_token: "${BICHON_API_TOKEN}"         # Bearer token for Bichon's API
 
 # --- Database ---------------------------------------------------------------
 # The SQLite sidecar — Berger's only state. Created on first run, opened in
@@ -25,25 +26,28 @@ database:
 
 # --- Accounts ---------------------------------------------------------------
 # The mail accounts to triage. At least one is required; Berger handles
-# several. `bichon_account_id` is the numeric id Bichon assigns the account
-# (visible in Bichon's account list). The `imap` block is where Berger
-# writes its triage actions back — it is used for writeback only, never for
-# reading.
+# several. Every per-account value is interpolated from a numbered variable:
+# the first account uses the _1 suffix, the second _2, and so on. The `imap`
+# block is where Berger writes its triage actions back — writeback only,
+# never for reading.
 accounts:
-  - name: "LINAGORA"                       # a label, unique across accounts
-    bichon_account_id: "8525922389589073"  # numeric, from Bichon
+  - name: "account-1"                      # a label, unique across accounts
+    bichon_account_id: "${BICHON_ACCOUNT_ID_1}"   # numeric id, from Bichon
     imap:
-      host: "imap.linagora.com"
+      host: "${IMAP_HOST_1}"
       port: 993                            # optional, defaults to 993 (IMAPS)
-      user: "you@linagora.com"
-      password: "${LINAGORA_IMAP_PASSWORD}"
+      user: "${IMAP_USER_1}"
+      password: "${IMAP_PASSWORD_1}"
 
-  - name: "Gmail"
-    bichon_account_id: "1417038252461348"
+  # Drop this second account — and its _2 variables in .env — to triage a
+  # single mailbox. For a third account, add a block with the _3 suffix.
+  - name: "account-2"
+    bichon_account_id: "${BICHON_ACCOUNT_ID_2}"
     imap:
-      host: "imap.gmail.com"
-      user: "you@gmail.com"
-      password: "${GMAIL_IMAP_PASSWORD}"
+      host: "${IMAP_HOST_2}"
+      port: 993
+      user: "${IMAP_USER_2}"
+      password: "${IMAP_PASSWORD_2}"
 
 # --- Native filters ---------------------------------------------------------
 # Deterministic, no-LLM rules (PRD §5.2). Each rule declares exactly one of
@@ -81,9 +85,9 @@ filters:
 # is expected and `priority-high` when priority >= 4. If the call fails, the
 # message is tagged `llm_error` and triage continues.
 llm:
-  endpoint: "https://api.mistral.ai/v1/chat/completions"
-  model: "mistral-small-latest"            # or e.g. "gemma3:12b" on Ollama
-  api_key: "${MISTRAL_API_KEY}"            # omit for a local, unauthenticated endpoint
+  endpoint: "${LLM_ENDPOINT}"
+  model: "${LLM_MODEL}"                    # e.g. mistral-small-latest, gemma3:12b
+  api_key: "${LLM_API_KEY}"                # delete this line for a local, unauthenticated endpoint
   # The category vocabulary offered to the model. When set, the model is
   # asked to pick exactly one of these; when omitted, it invents a label.
   # A fixed list keeps your cat/* folders stable.
@@ -156,10 +160,10 @@ webhooks:
   # 1. Draft generation — a workflow that calls an LLM and IMAP-APPENDs a
   #    reply into the Drafts folder.
   - name: linatwin-draft
-    url: "https://n8n.example.com/webhook/linatwin/draft"
+    url: "${WEBHOOK_DRAFT_URL}"
     method: POST                           # optional, defaults to POST
     headers:
-      Authorization: "Bearer ${HERMES_TOKEN}"
+      Authorization: "Bearer ${WEBHOOK_DRAFT_TOKEN}"
     retry:
       max_attempts: 3                      # total tries, including the first
       backoff: exponential                 # 1s, 4s, 16s — or `fixed` (1s)
@@ -168,7 +172,7 @@ webhooks:
   #    carrying at least one of the listed tags, even if other tags also
   #    reference it.
   - name: hermes-push-urgent
-    url: "https://hermes.example.com/webhook/push/urgent"
+    url: "${WEBHOOK_URGENT_URL}"
     when:
       - priority-high
       - cat/urgent
@@ -177,7 +181,7 @@ webhooks:
   #    Berger renders it with Handlebars against the canonical payload and
   #    POSTs the result instead of the default JSON.
   - name: hermes-forward-christelle
-    url: "https://n8n.example.com/webhook/berger/delegate"
+    url: "${WEBHOOK_DELEGATE_URL}"
     template: |
       {"subject": "{{message.subject}}", "from": "{{message.from.email}}",
        "bichon": "{{bichon_message_uri}}"}

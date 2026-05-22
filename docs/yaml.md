@@ -45,7 +45,7 @@ stay out of the file.
 
 ```yaml
 bichon:
-  api_token: "${BICHON_API_KEY}"
+  api_token: "${BICHON_API_TOKEN}"
 ```
 
 Rules:
@@ -55,10 +55,14 @@ Rules:
 - An unterminated `${` or an empty `${}` is a fatal error.
 - Substitution is plain textual replacement — it happens before YAML
   parsing, so a variable may hold any value.
+- Because it is textual and runs before parsing, a `${...}` is replaced
+  **even inside a `#` comment** — never write a literal `${...}` in a
+  comment unless you mean it.
 
-Use `${VAR}` for the Bichon token, IMAP passwords, the LLM API key, and any
-secret in webhook headers. With Docker, provide the values through a `.env`
-file; under systemd, through an `EnvironmentFile` (see [`ops.md`](ops.md)).
+Use `${VAR}` for everything that varies between deployments — the Bichon
+URL, account hosts and ids, every credential. Copy `.env.example` to `.env`
+and fill it in. With Docker, docker compose loads `.env` automatically;
+under systemd, point an `EnvironmentFile` at it (see [`ops.md`](ops.md)).
 
 ## `bichon`
 
@@ -67,8 +71,8 @@ Bichon's REST API; it never connects to IMAP for reading.
 
 ```yaml
 bichon:
-  base_url: "https://bichon.example.com"
-  api_token: "${BICHON_API_KEY}"
+  base_url: "${BICHON_BASE_URL}"
+  api_token: "${BICHON_API_TOKEN}"
 ```
 
 | Field | Type | Required | Description |
@@ -103,13 +107,13 @@ several.
 
 ```yaml
 accounts:
-  - name: "LINAGORA"
-    bichon_account_id: "8525922389589073"
+  - name: "account-1"
+    bichon_account_id: "${BICHON_ACCOUNT_ID_1}"
     imap:
-      host: "imap.linagora.com"
+      host: "${IMAP_HOST_1}"
       port: 993
-      user: "you@linagora.com"
-      password: "${LINAGORA_IMAP_PASSWORD}"
+      user: "${IMAP_USER_1}"
+      password: "${IMAP_PASSWORD_1}"
 ```
 
 | Field | Type | Required | Description |
@@ -242,9 +246,9 @@ filters alone.
 
 ```yaml
 llm:
-  endpoint: "https://api.mistral.ai/v1/chat/completions"
-  model: "mistral-small-latest"
-  api_key: "${MISTRAL_API_KEY}"
+  endpoint: "${LLM_ENDPOINT}"
+  model: "${LLM_MODEL}"
+  api_key: "${LLM_API_KEY}"
   categories:
     - work
     - perso
@@ -345,10 +349,10 @@ The `webhooks` section is a list.
 ```yaml
 webhooks:
   - name: linatwin-draft
-    url: "https://n8n.example.com/webhook/linatwin/draft"
+    url: "${WEBHOOK_DRAFT_URL}"
     method: POST
     headers:
-      Authorization: "Bearer ${HERMES_TOKEN}"
+      Authorization: "Bearer ${WEBHOOK_DRAFT_TOKEN}"
     retry:
       max_attempts: 3
       backoff: exponential

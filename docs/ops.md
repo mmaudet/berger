@@ -47,12 +47,9 @@ cd berger
 cp berger.example.yaml berger.yaml      # then edit it
 $EDITOR berger.yaml
 
-# Secrets go in a gitignored .env beside docker-compose.yml.
-cat > .env <<'EOF'
-BICHON_API_KEY=...
-LINAGORA_IMAP_PASSWORD=...
-MISTRAL_API_KEY=...
-EOF
+# Configuration values go in a gitignored .env beside docker-compose.yml.
+cp .env.example .env
+$EDITOR .env                            # fill in every value
 
 docker compose up --build -d            # build the image and start the daemon
 docker compose logs -f                  # follow the JSON logs
@@ -120,11 +117,8 @@ Put the secrets in an environment file readable only by root and the service
 user — these become the `${VAR}` values the config interpolates:
 
 ```sh
-sudo tee /etc/berger/berger.env >/dev/null <<'EOF'
-BICHON_API_KEY=...
-LINAGORA_IMAP_PASSWORD=...
-MISTRAL_API_KEY=...
-EOF
+sudo cp .env.example /etc/berger/berger.env
+sudo $EDITOR /etc/berger/berger.env     # fill in every value
 sudo chmod 0640 /etc/berger/berger.env
 sudo chown root:berger /etc/berger/berger.env
 ```

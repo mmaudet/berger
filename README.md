@@ -53,13 +53,10 @@ cd berger
 cp berger.example.yaml berger.yaml
 $EDITOR berger.yaml          # set the Bichon URL, accounts, filters, actions
 
-# 3. Put the secrets in a .env file (gitignored). The variable names are
-#    the ${VAR} placeholders used in berger.yaml.
-cat > .env <<'EOF'
-BICHON_API_KEY=...
-LINAGORA_IMAP_PASSWORD=...
-MISTRAL_API_KEY=...
-EOF
+# 3. Fill in the environment file (gitignored). Copy the template, then set
+#    every value your berger.yaml references.
+cp .env.example .env
+$EDITOR .env
 
 # 4. Build and start the daemon.
 docker compose up --build -d

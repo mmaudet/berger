@@ -105,7 +105,7 @@ account label.
 Query Bichon's account list with the same token Berger will use:
 
 ```sh
-curl -s -H "Authorization: Bearer $BICHON_API_KEY" \
+curl -s -H "Authorization: Bearer $BICHON_API_TOKEN" \
   https://bichon.example.com/api/v1/minimal-account-list
 ```
 
@@ -118,9 +118,9 @@ The response is a JSON array; each entry has an `id` and an `email`:
 ]
 ```
 
-Use the `id` value as `bichon_account_id` in `berger.yaml`. It is written as
-a string in the YAML but must be a number — Berger parses it back to an
-integer for the search API.
+Put each `id` into `.env` as `BICHON_ACCOUNT_ID_1`, `BICHON_ACCOUNT_ID_2`,
+… — one per account. It must be numeric; Berger parses it back to an integer
+for the search API.
 
 ## Wiring Bichon into `berger.yaml`
 
@@ -129,16 +129,16 @@ sections look like this:
 
 ```yaml
 bichon:
-  base_url: "https://bichon.example.com"
-  api_token: "${BICHON_API_KEY}"        # never inline the token
+  base_url: "${BICHON_BASE_URL}"
+  api_token: "${BICHON_API_TOKEN}"      # never inline the token
 
 accounts:
-  - name: "LINAGORA"
-    bichon_account_id: "8525922389589073"
+  - name: "account-1"
+    bichon_account_id: "${BICHON_ACCOUNT_ID_1}"
     imap:
-      host: "imap.linagora.com"
-      user: "you@linagora.com"
-      password: "${LINAGORA_IMAP_PASSWORD}"
+      host: "${IMAP_HOST_1}"
+      user: "${IMAP_USER_1}"
+      password: "${IMAP_PASSWORD_1}"
 ```
 
 Note the two distinct credential paths:

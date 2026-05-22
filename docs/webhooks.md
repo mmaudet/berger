@@ -54,9 +54,9 @@ actions:
 
 webhooks:
   - name: linatwin-draft
-    url: "https://n8n.example.com/webhook/linatwin/draft"
+    url: "${WEBHOOK_DRAFT_URL}"
     headers:
-      Authorization: "Bearer ${HERMES_TOKEN}"
+      Authorization: "Bearer ${WEBHOOK_DRAFT_TOKEN}"
 ```
 
 A webhook's `when:` list narrows which messages actually fire it; its
@@ -152,7 +152,7 @@ string verbatim instead of the canonical JSON.
 ```yaml
 webhooks:
   - name: hermes-forward-christelle
-    url: "https://n8n.example.com/webhook/berger/delegate"
+    url: "${WEBHOOK_DELEGATE_URL}"
     template: |
       {"subject": "{{message.subject}}",
        "from": "{{message.from.name}} <{{message.from.email}}>",
@@ -211,9 +211,9 @@ actions:
 
 webhooks:
   - name: linatwin-draft
-    url: "https://n8n.example.com/webhook/linatwin/draft"
+    url: "${WEBHOOK_DRAFT_URL}"
     headers:
-      Authorization: "Bearer ${HERMES_TOKEN}"
+      Authorization: "Bearer ${WEBHOOK_DRAFT_TOKEN}"
 ```
 
 Flow:
@@ -244,7 +244,7 @@ actions:
 
 webhooks:
   - name: hermes-forward-christelle
-    url: "https://n8n.example.com/webhook/berger/delegate"
+    url: "${WEBHOOK_DELEGATE_URL}"
 ```
 
 Flow:
@@ -270,7 +270,7 @@ actions:
 
 webhooks:
   - name: hermes-push-urgent
-    url: "https://hermes.example.com/webhook/push/urgent"
+    url: "${WEBHOOK_URGENT_URL}"
     when:
       - priority-high
       - cat/urgent
