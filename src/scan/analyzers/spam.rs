@@ -28,7 +28,7 @@ const HIGH_SCORE_THRESHOLD: f64 = 5.0;
 
 /// Dimension 7: a single inbox-wide tally of the spam signals already
 /// present in the messages' headers.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize)]
 pub struct SpamSummary {
     /// Messages carrying `X-Spam-Flag: YES` (case-insensitive).
     pub flagged: usize,

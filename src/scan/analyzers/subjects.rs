@@ -26,7 +26,7 @@ use crate::ingest::types::Envelope;
 const TOP_NGRAMS: usize = 30;
 
 /// One recurring subject phrase and how often it appeared (dimension 8).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct SubjectNgram {
     /// The phrase — 2 or 3 words joined by single spaces.
     pub phrase: String,

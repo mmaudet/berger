@@ -27,7 +27,7 @@ use std::collections::HashSet;
 use crate::scan::analyzer::ScanReport;
 
 /// The kind of v1.0 filter a suggestion proposes.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub enum SuggestionKind {
     /// A `sender_in:` rule with one or more address/domain patterns.
     SenderIn(Vec<String>),
@@ -42,7 +42,7 @@ pub enum SuggestionKind {
 
 /// One candidate filter rule derived from the scan, ready to be reviewed
 /// and merged into `berger.yaml`.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct SuggestedFilter {
     /// A unique, descriptive suggestion name.
     pub name: String,
@@ -59,7 +59,7 @@ pub struct SuggestedFilter {
 }
 
 /// Every suggestion produced from one scan.
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize)]
 pub struct Suggestions {
     /// Candidate filter rules.
     pub filters: Vec<SuggestedFilter>,

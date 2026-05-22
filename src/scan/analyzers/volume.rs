@@ -23,7 +23,7 @@ use std::cmp::Reverse;
 use crate::ingest::types::Envelope;
 
 /// Dimension 10: how the inbox's mail is spread across the hours of the day.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize)]
 pub struct VolumeProfile {
     /// Messages per UTC hour-of-day — exactly 24 entries, index `0..=23`.
     pub hourly: Vec<usize>,

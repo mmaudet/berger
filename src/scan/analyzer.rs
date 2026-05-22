@@ -42,7 +42,7 @@ pub struct ScannedMessage<'a> {
 
 /// The result of a scan: the statistics measured over the inbox, ready to
 /// be turned into configuration suggestions and a report.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct ScanReport {
     /// Messages the scan considered — the INBOX and Sent folders.
     pub messages_analyzed: usize,

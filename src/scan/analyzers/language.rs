@@ -25,7 +25,7 @@ use std::collections::HashMap;
 use crate::ingest::types::Envelope;
 
 /// One detected language and its share of the sampled subjects (dimension 9).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct LanguageShare {
     /// The ISO 639-3 language code, e.g. `eng` or `fra`.
     pub language: String,

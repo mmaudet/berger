@@ -34,7 +34,7 @@ const TOP_BIDIRECTIONAL: usize = 30;
 const TOP_DOMAINS: usize = 50;
 
 /// One sender and how much mail the inbox received from them (dimension 1).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct SenderCount {
     /// The sender's lowercased email address.
     pub address: String,
@@ -43,7 +43,7 @@ pub struct SenderCount {
 }
 
 /// One domain and how much inbound mail came from it (dimension 3).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct DomainCount {
     /// The lowercased domain.
     pub domain: String,
@@ -52,7 +52,7 @@ pub struct DomainCount {
 }
 
 /// A contact the user both receives from and writes to (dimension 2).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct BidirectionalContact {
     /// The contact's lowercased email address.
     pub address: String,

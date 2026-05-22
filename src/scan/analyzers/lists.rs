@@ -27,7 +27,7 @@ use crate::scan::analyzer::ScannedMessage;
 const TOP_LISTS: usize = 50;
 
 /// One mailing list the inbox receives mail from (dimension 5).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct MailingList {
     /// The normalized list identifier — the `<...>` part of the `List-Id`
     /// header, trimmed and lowercased.

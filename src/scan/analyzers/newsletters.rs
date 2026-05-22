@@ -32,7 +32,7 @@ use crate::scan::analyzer::ScannedMessage;
 const TOP_NEWSLETTER_DOMAINS: usize = 50;
 
 /// One sender domain and the newsletter mail it sends (dimension 4).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct NewsletterDomain {
     /// The lowercased sender domain.
     pub domain: String,

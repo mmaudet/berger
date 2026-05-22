@@ -35,7 +35,7 @@ const TOP_NOTIFICATION_SERVICES: usize = 50;
 
 /// One notification service and how much notification mail the inbox
 /// received from it (dimension 6).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct NotificationService {
     /// The lowercased sender domain.
     pub domain: String,
