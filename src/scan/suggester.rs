@@ -14,15 +14,17 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-//! Suggester: turns a [`ScanReport`]'s raw dimensions into candidate
-//! `berger.yaml` filter rules, each scored by the PRD v1.1 §4.4 confidence
-//! formula and gated by the min-evidence threshold.
+//! Suggester: turns a [`ScanReport`]'s category dimensions into a small set
+//! of `berger.yaml` filter rules — one factored rule per category, scored
+//! by the PRD v1.1 §4.4 confidence formula and gated by min-evidence.
 //!
-//! Suggestions only ever use filter types the existing v1.0 config loader
-//! already understands — `sender_in` and `header_match` — so the generated
-//! YAML stays mergeable into a real `berger.yaml` (PRD v1.1 §7).
-
-use std::collections::HashSet;
+//! Only the dimensions that *are* triage categories produce rules:
+//! newsletters, mailing lists, notification services, two-way contacts and
+//! spam. The pure-frequency dimensions — top senders, top domains — are
+//! reported but never turned into rules: a frequent sender is not a
+//! category, and grouping domains into themes is a human or LLM judgement.
+//! Rules use only filter types the v1.0 config loader understands, so the
+//! YAML merges straight into a real `berger.yaml` (PRD v1.1 §7).
 
 use crate::scan::analyzer::ScanReport;
 
@@ -38,6 +40,8 @@ pub enum SuggestionKind {
         /// The regex matched against it.
         pattern: String,
     },
+    /// A `list_unsubscribe: true` native filter rule.
+    ListUnsubscribe,
 }
 
 /// One candidate filter rule derived from the scan, ready to be reviewed
@@ -77,103 +81,112 @@ pub fn confidence(messages: usize, bidirectional_ratio: f64) -> f64 {
     score.clamp(0.0, 1.0)
 }
 
-/// Turns a [`ScanReport`] into candidate filter rules, dropping every
-/// dimension entry backed by fewer than `min_evidence` messages
-/// (PRD v1.1 §4.4).
+/// Turns a [`ScanReport`] into a small set of candidate filter rules — one
+/// factored rule per category dimension, each category needing at least
+/// `min_evidence` messages of support (PRD v1.1 §4.4).
 pub fn suggest(report: &ScanReport, min_evidence: usize) -> Suggestions {
     let mut filters: Vec<SuggestedFilter> = Vec::new();
 
-    // Dimension 3: recurring sender domains.
-    for domain in &report.top_domains {
-        if domain.messages_received < min_evidence {
-            continue;
-        }
+    // Newsletters → one native `list_unsubscribe` rule covering them all.
+    let newsletter_messages: usize = report
+        .newsletters
+        .iter()
+        .map(|domain| domain.messages)
+        .sum();
+    if newsletter_messages >= min_evidence {
         filters.push(SuggestedFilter {
-            name: format!("scan-domain-{}", slug(&domain.domain)),
-            kind: SuggestionKind::SenderIn(vec![format!("*@{}", domain.domain)]),
-            tag: format!("scan/{}", slug(&domain.domain)),
-            evidence_messages: domain.messages_received,
-            confidence: confidence(domain.messages_received, 0.0),
-            rationale: format!(
-                "{} messages received from this domain",
-                domain.messages_received
-            ),
-        });
-    }
-
-    // Dimension 2: bidirectional contacts.
-    for contact in &report.bidirectional {
-        if contact.messages_received < min_evidence {
-            continue;
-        }
-        filters.push(SuggestedFilter {
-            name: format!("scan-contact-{}", slug(&contact.address)),
-            kind: SuggestionKind::SenderIn(vec![contact.address.clone()]),
-            tag: "vip".to_string(),
-            evidence_messages: contact.messages_received,
-            confidence: confidence(contact.messages_received, contact.bidirectional_ratio),
-            rationale: format!(
-                "{} received / {} sent — a two-way contact",
-                contact.messages_received, contact.messages_sent_to
-            ),
-        });
-    }
-
-    // Dimension 4: newsletters.
-    for newsletter in &report.newsletters {
-        if newsletter.messages < min_evidence {
-            continue;
-        }
-        filters.push(SuggestedFilter {
-            name: format!("scan-newsletter-{}", slug(&newsletter.domain)),
-            kind: SuggestionKind::SenderIn(vec![format!("*@{}", newsletter.domain)]),
+            name: "scan-newsletter".to_string(),
+            kind: SuggestionKind::ListUnsubscribe,
             tag: "newsletter".to_string(),
-            evidence_messages: newsletter.messages,
-            confidence: confidence(newsletter.messages, 0.0),
+            evidence_messages: newsletter_messages,
+            confidence: confidence(newsletter_messages, 0.0),
             rationale: format!(
-                "{} newsletter messages from {} distinct senders",
-                newsletter.messages, newsletter.distinct_senders
+                "{} bulk messages across {} domains carry a List-Unsubscribe header",
+                newsletter_messages,
+                report.newsletters.len()
             ),
         });
     }
 
-    // Dimension 5: mailing lists.
-    for list in &report.mailing_lists {
-        if list.messages < min_evidence {
-            continue;
-        }
+    // Mailing lists → one generic rule on the List-Id header.
+    let list_messages: usize = report.mailing_lists.iter().map(|list| list.messages).sum();
+    if list_messages >= min_evidence {
         filters.push(SuggestedFilter {
-            name: format!("scan-list-{}", slug(&list.list_id)),
+            name: "scan-mailing-list".to_string(),
             kind: SuggestionKind::HeaderMatch {
                 header: "List-Id".to_string(),
-                pattern: regex::escape(&list.list_id),
+                pattern: ".".to_string(),
             },
             tag: "mailing-list".to_string(),
-            evidence_messages: list.messages,
-            confidence: confidence(list.messages, 0.0),
-            rationale: format!("{} messages from this mailing list", list.messages),
-        });
-    }
-
-    // Dimension 6: notification services.
-    for service in &report.notification_services {
-        if service.messages < min_evidence {
-            continue;
-        }
-        filters.push(SuggestedFilter {
-            name: format!("scan-notification-{}", slug(&service.domain)),
-            kind: SuggestionKind::SenderIn(vec![format!("*@{}", service.domain)]),
-            tag: "notification".to_string(),
-            evidence_messages: service.messages,
-            confidence: confidence(service.messages, 0.0),
+            evidence_messages: list_messages,
+            confidence: confidence(list_messages, 0.0),
             rationale: format!(
-                "{} automated notifications from this service",
-                service.messages
+                "{} messages across {} lists carry a List-Id header",
+                list_messages,
+                report.mailing_lists.len()
             ),
         });
     }
 
-    // Dimension 7: confirmed spam.
+    // Notification services → one `sender_in` rule listing the domains
+    // that each cleared the evidence threshold.
+    let services: Vec<_> = report
+        .notification_services
+        .iter()
+        .filter(|service| service.messages >= min_evidence)
+        .collect();
+    if !services.is_empty() {
+        let messages: usize = services.iter().map(|service| service.messages).sum();
+        filters.push(SuggestedFilter {
+            name: "scan-notification".to_string(),
+            kind: SuggestionKind::SenderIn(
+                services
+                    .iter()
+                    .map(|service| service.domain.clone())
+                    .collect(),
+            ),
+            tag: "notification".to_string(),
+            evidence_messages: messages,
+            confidence: confidence(messages, 0.0),
+            rationale: format!(
+                "{} automated messages from {} notification domains",
+                messages,
+                services.len()
+            ),
+        });
+    }
+
+    // Two-way contacts → one `sender_in` rule listing the VIP addresses.
+    let contacts: Vec<_> = report
+        .bidirectional
+        .iter()
+        .filter(|contact| contact.messages_received >= min_evidence)
+        .collect();
+    if !contacts.is_empty() {
+        let messages: usize = contacts
+            .iter()
+            .map(|contact| contact.messages_received)
+            .sum();
+        filters.push(SuggestedFilter {
+            name: "scan-vip".to_string(),
+            kind: SuggestionKind::SenderIn(
+                contacts
+                    .iter()
+                    .map(|contact| contact.address.clone())
+                    .collect(),
+            ),
+            tag: "vip".to_string(),
+            evidence_messages: messages,
+            confidence: confidence(messages, 0.0),
+            rationale: format!(
+                "{} messages from {} two-way contacts",
+                messages,
+                contacts.len()
+            ),
+        });
+    }
+
+    // Confirmed spam → one rule on the X-Spam-Flag header.
     if report.spam.flagged >= min_evidence {
         filters.push(SuggestedFilter {
             name: "scan-spam-confirmed".to_string(),
@@ -191,56 +204,7 @@ pub fn suggest(report: &ScanReport, min_evidence: usize) -> Suggestions {
         });
     }
 
-    Suggestions {
-        filters: consolidate(filters),
-    }
-}
-
-/// Consolidates candidate suggestions so a typical message is tagged at
-/// most once by the `sender_in` rules (PRD v1.1 §4.4, tag-once objective):
-/// when several dimensions propose the very same `sender_in` matcher, only
-/// the highest-priority one is kept. `header_match` rules always pass
-/// through — a message can still match one of those as well, hence "at
-/// most twice".
-fn consolidate(mut filters: Vec<SuggestedFilter>) -> Vec<SuggestedFilter> {
-    filters.sort_by_key(|filter| tag_priority(&filter.tag));
-    let mut seen: HashSet<Vec<String>> = HashSet::new();
-    filters.retain(|filter| match &filter.kind {
-        SuggestionKind::SenderIn(patterns) => seen.insert(patterns.clone()),
-        SuggestionKind::HeaderMatch { .. } => true,
-    });
-    filters
-}
-
-/// The keep-priority of a suggestion, by its tag — the lower value is kept
-/// when two rules collide on the same `sender_in` matcher.
-fn tag_priority(tag: &str) -> u8 {
-    match tag {
-        "newsletter" => 0,
-        "notification" => 1,
-        "vip" => 2,
-        _ => 3,
-    }
-}
-
-/// An identifier-safe slug of `value`: lowercase ASCII alphanumerics, with
-/// every run of other characters collapsed to a single `-` and no leading
-/// or trailing `-`.
-fn slug(value: &str) -> String {
-    let mut out = String::with_capacity(value.len());
-    let mut pending_dash = false;
-    for ch in value.chars() {
-        if ch.is_ascii_alphanumeric() {
-            if pending_dash && !out.is_empty() {
-                out.push('-');
-            }
-            out.push(ch.to_ascii_lowercase());
-            pending_dash = false;
-        } else {
-            pending_dash = true;
-        }
-    }
-    out
+    Suggestions { filters }
 }
 
 #[cfg(test)]
@@ -250,7 +214,7 @@ mod tests {
     use crate::scan::analyzers::lists::MailingList;
     use crate::scan::analyzers::newsletters::NewsletterDomain;
     use crate::scan::analyzers::notifications::NotificationService;
-    use crate::scan::analyzers::senders::DomainCount;
+    use crate::scan::analyzers::senders::{BidirectionalContact, DomainCount, SenderCount};
     use crate::scan::analyzers::spam::SpamSummary;
     use crate::scan::analyzers::volume::VolumeProfile;
 
@@ -269,6 +233,15 @@ mod tests {
             subject_ngrams: Vec::new(),
             languages: Vec::new(),
             volume: VolumeProfile::default(),
+        }
+    }
+
+    fn contact(address: &str, received: usize) -> BidirectionalContact {
+        BidirectionalContact {
+            address: address.to_string(),
+            messages_received: received,
+            messages_sent_to: 5,
+            bidirectional_ratio: 0.4,
         }
     }
 
@@ -293,47 +266,106 @@ mod tests {
     }
 
     #[test]
-    fn suggest_proposes_a_sender_in_rule_for_a_busy_domain() {
+    fn newsletters_yield_one_native_list_unsubscribe_rule() {
         let mut report = empty_report();
-        report.top_domains = vec![DomainCount {
-            domain: "github.com".to_string(),
-            messages_received: 40,
-        }];
+        report.newsletters = vec![
+            NewsletterDomain {
+                domain: "a.test".to_string(),
+                messages: 20,
+                distinct_senders: 3,
+            },
+            NewsletterDomain {
+                domain: "b.test".to_string(),
+                messages: 15,
+                distinct_senders: 2,
+            },
+        ];
         let suggestions = suggest(&report, 5);
         assert_eq!(suggestions.filters.len(), 1);
-        assert!(matches!(
-            suggestions.filters[0].kind,
-            SuggestionKind::SenderIn(_)
-        ));
+        assert_eq!(suggestions.filters[0].kind, SuggestionKind::ListUnsubscribe);
+        assert_eq!(suggestions.filters[0].tag, "newsletter");
     }
 
     #[test]
-    fn suggest_drops_entries_below_min_evidence() {
+    fn mailing_lists_yield_one_generic_list_id_rule() {
         let mut report = empty_report();
-        report.top_domains = vec![DomainCount {
-            domain: "rare.test".to_string(),
-            messages_received: 3,
-        }];
-        assert!(suggest(&report, 5).filters.is_empty());
-    }
-
-    #[test]
-    fn suggest_proposes_a_header_match_for_a_mailing_list() {
-        let mut report = empty_report();
-        report.mailing_lists = vec![MailingList {
-            list_id: "rust-users.rust-lang.org".to_string(),
-            messages: 20,
-        }];
+        report.mailing_lists = vec![
+            MailingList {
+                list_id: "x@a.test".to_string(),
+                messages: 10,
+            },
+            MailingList {
+                list_id: "y@b.test".to_string(),
+                messages: 8,
+            },
+        ];
         let suggestions = suggest(&report, 5);
         assert_eq!(suggestions.filters.len(), 1);
         assert!(matches!(
             &suggestions.filters[0].kind,
-            SuggestionKind::HeaderMatch { header, .. } if header == "List-Id"
+            SuggestionKind::HeaderMatch { header, pattern }
+                if header.as_str() == "List-Id" && pattern.as_str() == "."
         ));
     }
 
     #[test]
-    fn suggest_proposes_a_spam_rule_when_enough_spam_is_flagged() {
+    fn notification_services_become_one_sender_in_list() {
+        let mut report = empty_report();
+        report.notification_services = vec![
+            NotificationService {
+                domain: "github.com".to_string(),
+                messages: 40,
+            },
+            NotificationService {
+                domain: "gitlab.com".to_string(),
+                messages: 12,
+            },
+        ];
+        let suggestions = suggest(&report, 5);
+        assert_eq!(suggestions.filters.len(), 1);
+        assert!(matches!(
+            &suggestions.filters[0].kind,
+            SuggestionKind::SenderIn(domains) if domains.len() == 2
+        ));
+        assert_eq!(suggestions.filters[0].tag, "notification");
+    }
+
+    #[test]
+    fn notification_drops_domains_below_min_evidence() {
+        let mut report = empty_report();
+        report.notification_services = vec![
+            NotificationService {
+                domain: "busy.test".to_string(),
+                messages: 40,
+            },
+            NotificationService {
+                domain: "rare.test".to_string(),
+                messages: 2,
+            },
+        ];
+        let suggestions = suggest(&report, 5);
+        assert!(matches!(
+            &suggestions.filters[0].kind,
+            SuggestionKind::SenderIn(domains)
+                if domains == &["busy.test".to_string()]
+        ));
+    }
+
+    #[test]
+    fn bidirectional_contacts_become_one_vip_rule() {
+        let mut report = empty_report();
+        report.bidirectional = vec![contact("a@x.test", 30), contact("b@x.test", 20)];
+        let suggestions = suggest(&report, 5);
+        assert_eq!(suggestions.filters.len(), 1);
+        assert!(matches!(
+            &suggestions.filters[0].kind,
+            SuggestionKind::SenderIn(addresses) if addresses.len() == 2
+        ));
+        assert_eq!(suggestions.filters[0].tag, "vip");
+    }
+
+    #[test]
+    fn spam_yields_one_header_match_rule() {
         let mut report = empty_report();
         report.spam = SpamSummary {
             flagged: 12,
@@ -341,25 +373,60 @@ mod tests {
             dmarc_failures: 0,
         };
         let suggestions = suggest(&report, 5);
-        assert!(
-            suggestions
-                .filters
-                .iter()
-                .any(|filter| filter.tag == "spam")
-        );
+        assert_eq!(suggestions.filters.len(), 1);
+        assert_eq!(suggestions.filters[0].tag, "spam");
     }
 
     #[test]
-    fn suggest_keeps_a_newsletter_domain() {
+    fn the_frequency_dimensions_produce_no_rules() {
+        // Top senders and top domains are reported, not turned into rules:
+        // a frequent sender is not by itself a triage category.
+        let mut report = empty_report();
+        report.top_senders = vec![SenderCount {
+            address: "a@x.test".to_string(),
+            messages_received: 200,
+        }];
+        report.top_domains = vec![DomainCount {
+            domain: "x.test".to_string(),
+            messages_received: 500,
+        }];
+        assert!(suggest(&report, 5).filters.is_empty());
+    }
+
+    #[test]
+    fn a_category_below_min_evidence_is_dropped() {
         let mut report = empty_report();
         report.newsletters = vec![NewsletterDomain {
-            domain: "substack.com".to_string(),
-            messages: 30,
-            distinct_senders: 6,
+            domain: "a.test".to_string(),
+            messages: 3,
+            distinct_senders: 1,
         }];
-        let suggestions = suggest(&report, 5);
-        assert_eq!(suggestions.filters.len(), 1);
-        assert_eq!(suggestions.filters[0].tag, "newsletter");
+        assert!(suggest(&report, 5).filters.is_empty());
+    }
+
+    #[test]
+    fn a_full_report_yields_one_rule_per_category() {
+        let mut report = empty_report();
+        report.newsletters = vec![NewsletterDomain {
+            domain: "a.test".to_string(),
+            messages: 20,
+            distinct_senders: 2,
+        }];
+        report.mailing_lists = vec![MailingList {
+            list_id: "l@a.test".to_string(),
+            messages: 10,
+        }];
+        report.notification_services = vec![NotificationService {
+            domain: "n.test".to_string(),
+            messages: 30,
+        }];
+        report.bidirectional = vec![contact("v@x.test", 15)];
+        report.spam = SpamSummary {
+            flagged: 8,
+            high_score: 0,
+            dmarc_failures: 0,
+        };
+        assert_eq!(suggest(&report, 5).filters.len(), 5);
     }
 
     #[test]
@@ -370,37 +437,10 @@ mod tests {
     #[test]
     fn a_suggestion_carries_a_positive_confidence_score() {
         let mut report = empty_report();
-        report.top_domains = vec![DomainCount {
-            domain: "x.test".to_string(),
-            messages_received: 40,
-        }];
-        assert!(suggest(&report, 5).filters[0].confidence > 0.0);
-    }
-
-    #[test]
-    fn suggest_consolidates_a_domain_seen_by_two_dimensions() {
-        // The same domain surfaces as a top domain AND a notification
-        // service; both would propose `sender_in: ["*@github.com"]`.
-        let mut report = empty_report();
-        report.top_domains = vec![DomainCount {
-            domain: "github.com".to_string(),
-            messages_received: 40,
-        }];
         report.notification_services = vec![NotificationService {
-            domain: "github.com".to_string(),
+            domain: "n.test".to_string(),
             messages: 40,
         }];
-        let github_rules = suggest(&report, 5)
-            .filters
-            .iter()
-            .filter(|filter| {
-                matches!(
-                    &filter.kind,
-                    SuggestionKind::SenderIn(patterns)
-                        if patterns.iter().any(|p| p.as_str() == "*@github.com")
-                )
-            })
-            .count();
-        assert_eq!(github_rules, 1);
+        assert!(suggest(&report, 5).filters[0].confidence > 0.0);
     }
 }

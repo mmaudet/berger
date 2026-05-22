@@ -157,15 +157,20 @@ pub fn render_yaml(report: &ScanReport, suggestions: &Suggestions, period_days: 
         out.push_str(&format!("  # {}\n", filter.rationale));
         match &filter.kind {
             SuggestionKind::SenderIn(patterns) => {
-                let quoted: Vec<String> =
-                    patterns.iter().map(|pattern| yaml_quote(pattern)).collect();
-                out.push_str(&format!("  - sender_in: [{}]\n", quoted.join(", ")));
+                out.push_str("  - sender_in:\n");
+                for pattern in patterns {
+                    out.push_str(&format!("      - {}\n", yaml_quote(pattern)));
+                }
                 out.push_str(&format!("    tag: {}\n", yaml_quote(&filter.tag)));
             }
             SuggestionKind::HeaderMatch { header, pattern } => {
                 out.push_str("  - header_match:\n");
                 out.push_str(&format!("      header: {}\n", yaml_quote(header)));
                 out.push_str(&format!("      pattern: {}\n", yaml_quote(pattern)));
+                out.push_str(&format!("    tag: {}\n", yaml_quote(&filter.tag)));
+            }
+            SuggestionKind::ListUnsubscribe => {
+                out.push_str("  - list_unsubscribe: true\n");
                 out.push_str(&format!("    tag: {}\n", yaml_quote(&filter.tag)));
             }
         }
