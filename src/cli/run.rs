@@ -17,6 +17,7 @@
 //! The `run` command: the triage daemon loop.
 
 use std::hash::{DefaultHasher, Hash, Hasher};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use anyhow::Context;
@@ -29,6 +30,7 @@ use crate::llm::LlmClient;
 use crate::llm::classifier::Classifier;
 use crate::pipeline::{Pipeline, ProcessOutcome, compile_filters};
 use crate::storage::database::Database;
+use crate::webui::{self, AppState};
 
 /// How long to wait between poll cycles.
 const POLL_INTERVAL: Duration = Duration::from_secs(300);
@@ -70,6 +72,8 @@ pub async fn run(config_path: &str) -> anyhow::Result<()> {
         None => None,
     };
     let pipeline = Pipeline::new(filters, config.actions.clone(), config_hash, classifier);
+
+    spawn_webui(&config.database.path, &raw);
 
     tracing::info!(
         accounts = config.accounts.len(),
@@ -155,6 +159,29 @@ async fn poll_one_account(
         "poll cycle complete"
     );
     Ok(())
+}
+
+/// Starts the WebUI (PRD §5.7) as a background task on the fixed port.
+///
+/// The WebUI opens its own SQLite connection to the same sidecar file —
+/// safe because the database runs in WAL mode (PRD §5.8) — so the triage
+/// loop and the server never contend for one connection. A failure to open
+/// that connection, or to bind the port, is logged and leaves the daemon
+/// running: the triage loop, not the WebUI, is the daemon's core duty.
+fn spawn_webui(database_path: &str, raw_config: &str) {
+    let database = match Database::open(database_path) {
+        Ok(database) => database,
+        Err(error) => {
+            tracing::error!(error = %error, "webui disabled: cannot open the sidecar");
+            return;
+        }
+    };
+    let state = AppState::new(Arc::new(Mutex::new(database)), raw_config);
+    tokio::spawn(async move {
+        if let Err(error) = webui::serve(state, webui::DEFAULT_PORT).await {
+            tracing::error!(error = %error, "webui server stopped");
+        }
+    });
 }
 
 /// A short, stable fingerprint of the raw configuration text, recorded
