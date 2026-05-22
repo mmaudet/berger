@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+
+{% block title %}Berger — Stats{% endblock %}
+
+{% block content %}
+<h1>Stats</h1>
+<p class="subtitle">Triage activity recorded in the sidecar.</p>
+
+<h2>Messages processed</h2>
+<div class="cards">
+  <div class="card">
+    <div class="label">Last 24 hours</div>
+    <div class="value">{{ stats.processed_24h }}</div>
+  </div>
+  <div class="card">
+    <div class="label">Last 7 days</div>
+    <div class="value">{{ stats.processed_7d }}</div>
+  </div>
+  <div class="card">
+    <div class="label">Total</div>
+    <div class="value">{{ stats.processed_total }}</div>
+  </div>
+</div>
+
+<h2>LLM</h2>
+<div class="cards">
+  <div class="card">
+    <div class="label">Prompt tokens</div>
+    <div class="value">{{ stats.llm_tokens_input }}</div>
+    <div class="note">{{ stats.llm_tokens_output }} completion tokens</div>
+  </div>
+  <div class="card">
+    <div class="label">Estimated cost</div>
+    <div class="value">${{ cost_usd }}</div>
+  </div>
+  <div class="card">
+    <div class="label">Cache hit rate</div>
+    <div class="value">{{ cache_hit_rate }}%</div>
+    <div class="note">{{ stats.llm_cache_hits }} / {{ stats.llm_cache_lookups }} lookups</div>
+  </div>
+</div>
+
+<h2>Webhooks</h2>
+<div class="cards">
+  <div class="card">
+    <div class="label">Emitted</div>
+    <div class="value">{{ stats.webhooks_succeeded }}</div>
+  </div>
+  <div class="card">
+    <div class="label">Failed</div>
+    <div class="value">{{ stats.webhooks_failed }}</div>
+  </div>
+</div>
+{% endblock %}

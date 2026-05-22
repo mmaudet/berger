@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+
+{% block title %}Berger — Config{% endblock %}
+
+{% block content %}
+<h1>Configuration</h1>
+<p class="subtitle">
+  The active <code>berger.yaml</code>, read-only. Restart Berger to apply changes.
+</p>
+<pre><code>{{ config_yaml }}</code></pre>
+{% endblock %}

@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+
+{% block title %}Berger — Recent{% endblock %}
+
+{% block content %}
+<h1>Recent messages</h1>
+<p class="subtitle">The {{ messages.len() }} most recently triaged messages.</p>
+
+{% if messages.is_empty() %}
+<div class="empty">No message has been triaged yet.</div>
+{% else %}
+<table>
+  <thead>
+    <tr>
+      <th>Processed</th>
+      <th>From</th>
+      <th>Subject</th>
+      <th>Tags</th>
+      <th>Actions</th>
+      <th></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for message in messages %}
+    <tr>
+      <td class="muted">{{ message.processed_at }}</td>
+      <td>
+        {% match message.from_name %}
+          {% when Some with (name) %}{{ name }}
+          {% when None %}
+            {% match message.from_email %}
+              {% when Some with (email) %}{{ email }}
+              {% when None %}<span class="muted">unknown</span>
+            {% endmatch %}
+        {% endmatch %}
+      </td>
+      <td>
+        {% match message.subject %}
+          {% when Some with (subject) %}{{ subject }}
+          {% when None %}<span class="muted">(no subject)</span>
+        {% endmatch %}
+      </td>
+      <td>
+        {% if message.tags.is_empty() %}<span class="muted">—</span>{% endif %}
+        {% for tag in message.tags %}<span class="tag">{{ tag }}</span>{% endfor %}
+      </td>
+      <td>
+        {% if message.actions.is_empty() %}<span class="muted">—</span>{% endif %}
+        {% for action in message.actions %}
+          <div class="muted"><code>{{ action }}</code></div>
+        {% endfor %}
+      </td>
+      <td><a href="/explain/{{ message.message_id|urlencode }}">explain</a></td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+{% endblock %}
