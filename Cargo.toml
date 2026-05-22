@@ -30,6 +30,7 @@ handlebars = "6.4.1"
 axum = "0.8.9"
 askama = "0.16.0"
 askama_web = { version = "0.16.0", default-features = false, features = ["derive", "axum-0.8"] }
+whatlang = "0.16"
 
 [dev-dependencies]
 testcontainers = "0.27.3"
