@@ -87,6 +87,26 @@ pub fn render_text(report: &ScanReport, suggestions: &Suggestions, period_days: 
         report.spam.flagged, report.spam.high_score, report.spam.dmarc_failures
     ));
 
+    section(&mut out, "SUBJECT PATTERNS");
+    for ngram in report.subject_ngrams.iter().take(TEXT_ROWS) {
+        out.push_str(&format!("  {:>6}  {}\n", ngram.occurrences, ngram.phrase));
+    }
+
+    section(&mut out, "LANGUAGES");
+    for share in &report.languages {
+        out.push_str(&format!(
+            "  {:>5.1}%  {}\n",
+            share.share * 100.0,
+            share.language
+        ));
+    }
+
+    section(&mut out, "HOURLY VOLUME");
+    out.push_str(&format!(
+        "  busiest hour: {:02}h00 UTC ({} messages)\n",
+        report.volume.busiest_hour, report.volume.peak_hour_messages
+    ));
+
     section(&mut out, "SUGGESTIONS");
     out.push_str(&format!(
         "  {} filter rule(s) suggested — review the YAML output before merging.\n",
@@ -168,13 +188,26 @@ fn yaml_quote(value: &str) -> String {
     out
 }
 
+/// Renders the scan as a JSON document (PRD v1.1 §4.3, output 3) — the
+/// machine-readable form, for third-party integration.
+pub fn render_json(report: &ScanReport, suggestions: &Suggestions, period_days: u32) -> String {
+    let document = serde_json::json!({
+        "period_days": period_days,
+        "report": report,
+        "suggestions": suggestions.filters,
+    });
+    serde_json::to_string_pretty(&document).unwrap_or_else(|_| "{}".to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::config::BergerConfig;
     use crate::scan::analyzer::ScanReport;
+    use crate::scan::analyzers::language::LanguageShare;
     use crate::scan::analyzers::senders::SenderCount;
     use crate::scan::analyzers::spam::SpamSummary;
+    use crate::scan::analyzers::subjects::SubjectNgram;
     use crate::scan::analyzers::volume::VolumeProfile;
     use crate::scan::suggester::SuggestedFilter;
 
@@ -304,5 +337,37 @@ mod tests {
     fn yaml_with_no_suggestions_is_an_empty_filters_list() {
         let yaml = render_yaml(&empty_report(), &Suggestions::default(), 30);
         assert!(yaml.contains("filters: []"));
+    }
+
+    #[test]
+    fn text_report_shows_the_envelope_dimensions() {
+        let mut report = empty_report();
+        report.subject_ngrams = vec![SubjectNgram {
+            phrase: "weekly report".to_string(),
+            occurrences: 12,
+        }];
+        report.languages = vec![LanguageShare {
+            language: "fra".to_string(),
+            share: 0.8,
+        }];
+        report.volume = VolumeProfile {
+            hourly: vec![0; 24],
+            busiest_hour: 9,
+            peak_hour_messages: 30,
+        };
+        let text = render_text(&report, &Suggestions::default(), 30);
+        assert!(text.contains("weekly report"));
+        assert!(text.contains("fra"));
+        assert!(text.contains("busiest hour"));
+    }
+
+    #[test]
+    fn json_output_is_valid_and_carries_the_scan() {
+        let json = render_json(&empty_report(), &sample_suggestions(), 30);
+        let value: serde_json::Value =
+            serde_json::from_str(&json).expect("render_json must produce valid JSON");
+        assert_eq!(value["period_days"], 30);
+        assert!(value["report"].is_object());
+        assert_eq!(value["suggestions"].as_array().map(Vec::len), Some(2));
     }
 }
