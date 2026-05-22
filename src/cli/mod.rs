@@ -19,6 +19,7 @@
 use clap::{Parser, Subcommand};
 
 mod db;
+pub mod dry_run;
 pub mod explain;
 pub mod export_thunderbird;
 mod run;
@@ -60,6 +61,14 @@ enum Command {
         config: String,
     },
 
+    /// Run one poll cycle without applying any IMAP action or recording
+    /// anything — print the tags and actions Berger would apply.
+    DryRun {
+        /// Path to the configuration file.
+        #[arg(long, default_value = "berger.yaml")]
+        config: String,
+    },
+
     /// Export the `actions:` configuration as a Mozilla Thunderbird
     /// `msgFilterRules.dat` ruleset, printed to stdout.
     ExportThunderbird {
@@ -85,6 +94,7 @@ impl Cli {
             Command::Run { config } => run::run(&config).await,
             Command::Explain { message_id, config } => explain::run(&config, &message_id),
             Command::Status { config } => status::run(&config),
+            Command::DryRun { config } => dry_run::run(&config).await,
             Command::ExportThunderbird {
                 config,
                 account,
