@@ -22,6 +22,8 @@
 //! already understands — `sender_in` and `header_match` — so the generated
 //! YAML stays mergeable into a real `berger.yaml` (PRD v1.1 §7).
 
+use std::collections::HashSet;
+
 use crate::scan::analyzer::ScanReport;
 
 /// The kind of v1.0 filter a suggestion proposes.
@@ -189,7 +191,36 @@ pub fn suggest(report: &ScanReport, min_evidence: usize) -> Suggestions {
         });
     }
 
-    Suggestions { filters }
+    Suggestions {
+        filters: consolidate(filters),
+    }
+}
+
+/// Consolidates candidate suggestions so a typical message is tagged at
+/// most once by the `sender_in` rules (PRD v1.1 §4.4, tag-once objective):
+/// when several dimensions propose the very same `sender_in` matcher, only
+/// the highest-priority one is kept. `header_match` rules always pass
+/// through — a message can still match one of those as well, hence "at
+/// most twice".
+fn consolidate(mut filters: Vec<SuggestedFilter>) -> Vec<SuggestedFilter> {
+    filters.sort_by_key(|filter| tag_priority(&filter.tag));
+    let mut seen: HashSet<Vec<String>> = HashSet::new();
+    filters.retain(|filter| match &filter.kind {
+        SuggestionKind::SenderIn(patterns) => seen.insert(patterns.clone()),
+        SuggestionKind::HeaderMatch { .. } => true,
+    });
+    filters
+}
+
+/// The keep-priority of a suggestion, by its tag — the lower value is kept
+/// when two rules collide on the same `sender_in` matcher.
+fn tag_priority(tag: &str) -> u8 {
+    match tag {
+        "newsletter" => 0,
+        "notification" => 1,
+        "vip" => 2,
+        _ => 3,
+    }
 }
 
 /// An identifier-safe slug of `value`: lowercase ASCII alphanumerics, with
@@ -218,6 +249,7 @@ mod tests {
     use crate::scan::analyzer::ScanReport;
     use crate::scan::analyzers::lists::MailingList;
     use crate::scan::analyzers::newsletters::NewsletterDomain;
+    use crate::scan::analyzers::notifications::NotificationService;
     use crate::scan::analyzers::senders::DomainCount;
     use crate::scan::analyzers::spam::SpamSummary;
     use crate::scan::analyzers::volume::VolumeProfile;
@@ -343,5 +375,32 @@ mod tests {
             messages_received: 40,
         }];
         assert!(suggest(&report, 5).filters[0].confidence > 0.0);
+    }
+
+    #[test]
+    fn suggest_consolidates_a_domain_seen_by_two_dimensions() {
+        // The same domain surfaces as a top domain AND a notification
+        // service; both would propose `sender_in: ["*@github.com"]`.
+        let mut report = empty_report();
+        report.top_domains = vec![DomainCount {
+            domain: "github.com".to_string(),
+            messages_received: 40,
+        }];
+        report.notification_services = vec![NotificationService {
+            domain: "github.com".to_string(),
+            messages: 40,
+        }];
+        let github_rules = suggest(&report, 5)
+            .filters
+            .iter()
+            .filter(|filter| {
+                matches!(
+                    &filter.kind,
+                    SuggestionKind::SenderIn(patterns)
+                        if patterns.iter().any(|p| p.as_str() == "*@github.com")
+                )
+            })
+            .count();
+        assert_eq!(github_rules, 1);
     }
 }
