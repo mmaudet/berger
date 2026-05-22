@@ -13,3 +13,22 @@
 //
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+//! WebUI: the Axum HTTP server and its four Askama-rendered pages (PRD §5.7).
+//!
+//! `berger run` starts [`serve`] as a background task on port [`DEFAULT_PORT`].
+//! It exposes `/` (stats), `/recent` (recently triaged messages),
+//! `/explain/<id>` (the full triage of one message) and `/config` (the
+//! active configuration, secrets redacted), reading the sidecar through
+//! [`Database::connection`](crate::storage::database::Database::connection).
+
+pub mod error;
+pub mod queries;
+pub mod server;
+pub mod static_assets;
+pub mod templates;
+
+pub use server::{AppState, serve};
+
+/// The port the WebUI listens on — fixed by PRD §5.7.
+pub const DEFAULT_PORT: u16 = 7000;

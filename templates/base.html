@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Berger{% endblock %}</title>
+  <link rel="stylesheet" href="/static/berger.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <a class="brand" href="/">Berger</a>
+      <nav class="tabs">
+        <a href="/"{% if active == "home" %} class="active"{% endif %}>Stats</a>
+        <a href="/recent"{% if active == "recent" %} class="active"{% endif %}>Recent</a>
+        <a href="/config"{% if active == "config" %} class="active"{% endif %}>Config</a>
+      </nav>
+    </div>
+  </header>
+  <main class="layout">
+    {% block content %}{% endblock %}
+    <footer class="site">
+      Berger {{ berger_version }} — open-source email triage daemon — AGPLv3
+    </footer>
+  </main>
+</body>
+</html>

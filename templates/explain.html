@@ -1,0 +1,190 @@
+{% extends "base.html" %}
+
+{% block title %}Berger — Explain{% endblock %}
+
+{% block content %}
+<h1>Triage of one message</h1>
+<p class="subtitle"><code>{{ explanation.message_id }}</code></p>
+
+<div class="section">
+  <h2 style="margin-top:0">Message</h2>
+  <dl class="kv">
+    <dt>Subject</dt>
+    <dd>
+      {% match explanation.subject %}
+        {% when Some with (subject) %}{{ subject }}
+        {% when None %}<span class="muted">(no subject)</span>
+      {% endmatch %}
+    </dd>
+    <dt>From</dt>
+    <dd>
+      {% match explanation.from_name %}
+        {% when Some with (name) %}{{ name }}
+        {% when None %}<span class="muted">unknown</span>
+      {% endmatch %}
+      {% match explanation.from_email %}
+        {% when Some with (email) %}<span class="muted">&lt;{{ email }}&gt;</span>
+        {% when None %}
+      {% endmatch %}
+    </dd>
+    <dt>Processed at</dt>
+    <dd class="muted">{{ explanation.processed_at }}</dd>
+    <dt>Berger version</dt>
+    <dd class="muted">{{ explanation.berger_version }}</dd>
+  </dl>
+</div>
+
+<div class="section">
+  <h2 style="margin-top:0">Tags</h2>
+  {% if explanation.tags.is_empty() %}
+  <p class="muted">No tag was applied to this message.</p>
+  {% else %}
+  <p>{% for tag in explanation.tags %}<span class="tag">{{ tag }}</span>{% endfor %}</p>
+  {% endif %}
+</div>
+
+<div class="section">
+  <h2 style="margin-top:0">Filters that matched</h2>
+  {% if explanation.filter_matches.is_empty() %}
+  <p class="muted">No native or LLM filter match was recorded.</p>
+  {% else %}
+  <table>
+    <thead><tr><th>Type</th><th>Name</th><th>Details</th></tr></thead>
+    <tbody>
+      {% for entry in explanation.filter_matches %}
+      <tr>
+        <td><code>{{ entry.filter_type }}</code></td>
+        <td>{{ entry.filter_name }}</td>
+        <td>
+          {% match entry.details_json %}
+            {% when Some with (details) %}<code class="muted">{{ details }}</code>
+            {% when None %}<span class="muted">—</span>
+          {% endmatch %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</div>
+
+<div class="section">
+  <h2 style="margin-top:0">LLM decision</h2>
+  {% if explanation.llm_decisions.is_empty() %}
+  <p class="muted">The LLM classifier was not consulted for this message.</p>
+  {% else %}
+  {% for decision in explanation.llm_decisions %}
+  <dl class="kv">
+    <dt>Model</dt>
+    <dd><code>{{ decision.model }}</code></dd>
+    <dt>Called at</dt>
+    <dd class="muted">{{ decision.called_at }}</dd>
+    <dt>Tokens</dt>
+    <dd class="muted">
+      {% match decision.tokens_input %}
+        {% when Some with (count) %}{{ count }} in
+        {% when None %}? in
+      {% endmatch %}
+      /
+      {% match decision.tokens_output %}
+        {% when Some with (count) %}{{ count }} out
+        {% when None %}? out
+      {% endmatch %}
+    </dd>
+    <dt>Latency</dt>
+    <dd class="muted">
+      {% match decision.latency_ms %}
+        {% when Some with (ms) %}{{ ms }} ms
+        {% when None %}—
+      {% endmatch %}
+    </dd>
+    <dt>Cost</dt>
+    <dd class="muted">
+      {% match decision.cost_usd %}
+        {% when Some with (cost) %}${{ cost }}
+        {% when None %}—
+      {% endmatch %}
+    </dd>
+  </dl>
+  <h2>Prompt sent</h2>
+  <pre><code>{{ decision.prompt_text }}</code></pre>
+  <h2>Raw LLM output</h2>
+  <pre><code>{{ decision.response_json }}</code></pre>
+  {% endfor %}
+  {% endif %}
+</div>
+
+<div class="section">
+  <h2 style="margin-top:0">IMAP actions applied</h2>
+  {% if explanation.actions.is_empty() %}
+  <p class="muted">No IMAP action was applied to this message.</p>
+  {% else %}
+  <table>
+    <thead>
+      <tr><th>Action</th><th>Target</th><th>Result</th><th>When</th></tr>
+    </thead>
+    <tbody>
+      {% for action in explanation.actions %}
+      <tr>
+        <td><code>{{ action.action_type }}</code></td>
+        <td>
+          {% match action.target %}
+            {% when Some with (target) %}<code>{{ target }}</code>
+            {% when None %}<span class="muted">—</span>
+          {% endmatch %}
+        </td>
+        <td>
+          {% if action.succeeded %}<span class="pill ok">ok</span>
+          {% else %}
+            <span class="pill err">failed</span>
+            {% match action.error %}
+              {% when Some with (error) %}<span class="muted">{{ error }}</span>
+              {% when None %}
+            {% endmatch %}
+          {% endif %}
+        </td>
+        <td class="muted">{{ action.executed_at }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</div>
+
+<div class="section">
+  <h2 style="margin-top:0">Webhooks emitted</h2>
+  {% if explanation.webhooks.is_empty() %}
+  <p class="muted">No webhook was emitted for this message.</p>
+  {% else %}
+  <table>
+    <thead>
+      <tr>
+        <th>Webhook</th><th>HTTP status</th><th>Attempts</th>
+        <th>Result</th><th>When</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for webhook in explanation.webhooks %}
+      <tr>
+        <td>{{ webhook.webhook_name }}</td>
+        <td class="muted">
+          {% match webhook.http_status %}
+            {% when Some with (status) %}{{ status }}
+            {% when None %}—
+          {% endmatch %}
+        </td>
+        <td class="muted">{{ webhook.attempts }}</td>
+        <td>
+          {% if webhook.succeeded %}<span class="pill ok">ok</span>
+          {% else %}<span class="pill err">failed</span>{% endif %}
+        </td>
+        <td class="muted">{{ webhook.emitted_at }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</div>
+
+<p><a href="/recent">&larr; back to recent messages</a></p>
+{% endblock %}
