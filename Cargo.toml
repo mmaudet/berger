@@ -3,7 +3,7 @@ name = "berger"
 version = "0.1.0"
 edition = "2024"
 license = "AGPL-3.0-or-later"
-authors = ["Michel-Marie Maudet <michel-marie@linagora.com>"]
+authors = ["Michel-Marie Maudet <michel.maudet@protonmail.com>"]
 description = "Open-source email triage daemon, the afew of 2026"
 repository = "https://github.com/mmaudet/berger"
 
