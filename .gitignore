@@ -15,3 +15,6 @@ berger.db*
 
 # Personal runtime config (the committed reference is berger.example.yaml)
 /berger.yaml
+
+# berger scan output — reports carry real mailbox metadata
+berger-scan-*
