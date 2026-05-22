@@ -1,0 +1,12 @@
+# Keep the build context small and free of host-only or secret files.
+/target
+*.env
+.env
+berger.db
+berger.db-shm
+berger.db-wal
+berger.yaml
+.git
+.github
+docs
+*.md

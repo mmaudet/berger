@@ -1,0 +1,53 @@
+# Berger — single-service deployment.
+#
+# Berger is a self-contained daemon: it polls Bichon, triages, writes back
+# over IMAP, serves the WebUI, and keeps all of its state in one SQLite
+# sidecar file. There is nothing else to run.
+#
+#   docker compose up -d        start the daemon
+#   docker compose logs -f      follow the JSON logs
+#   docker compose down         stop it
+#
+# Before the first start:
+#   1. copy berger.example.yaml to ./berger.yaml and edit it for your setup;
+#   2. copy the secrets into a .env file beside this one (see below).
+#
+# The config interpolates ${VAR} placeholders from the environment, so the
+# real secrets stay in .env — gitignored — and never enter the YAML or the
+# image. docker compose loads ./.env automatically.
+
+services:
+  berger:
+    image: berger:0.1.0
+    # Build locally when the image is not present:
+    #   docker compose up --build
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: berger
+    restart: unless-stopped
+
+    # The WebUI (PRD §5.7). Bound to localhost only — it has no auth; put a
+    # reverse proxy in front if you need it reachable from elsewhere.
+    ports:
+      - "127.0.0.1:7000:7000"
+
+    volumes:
+      # The configuration, read-only — the container never writes to it.
+      - ./berger.yaml:/etc/berger/berger.yaml:ro
+      # The SQLite sidecar. A named volume keeps berger.db (and its -wal /
+      # -shm companions) on the host, so triage history and the idempotency
+      # ledger survive container restarts and image upgrades.
+      - berger-data:/data
+
+    # Secrets referenced as ${VAR} in berger.yaml — Bichon token, IMAP
+    # password, LLM API key. Provided through ./.env; see berger.example.yaml
+    # for the exact variable names.
+    env_file:
+      - .env
+
+    # berger.yaml sets `database.path: berger.db`; WorkingDir is /data, so
+    # the sidecar lands on the berger-data volume.
+
+volumes:
+  berger-data:
