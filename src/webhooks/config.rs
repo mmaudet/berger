@@ -46,6 +46,11 @@ pub struct WebhookConfig {
     /// list — the default — places no restriction.
     #[serde(default)]
     pub when: Vec<String>,
+    /// An optional Handlebars template for the request body (PRD §5.6).
+    /// When absent, the canonical `berger.tag_applied` payload is sent as
+    /// JSON; when present, this template is rendered against that payload.
+    #[serde(default)]
+    pub template: Option<String>,
 }
 
 /// The default HTTP method for a webhook.

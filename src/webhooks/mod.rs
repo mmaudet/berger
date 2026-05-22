@@ -23,5 +23,6 @@
 //! recorded in the `webhook_emissions` table.
 
 pub mod config;
+pub mod emitter;
 pub mod error;
 pub mod payload;
