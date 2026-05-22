@@ -18,6 +18,8 @@
 
 use clap::{Parser, Subcommand};
 
+mod db;
+pub mod explain;
 pub mod export_thunderbird;
 mod run;
 
@@ -35,6 +37,16 @@ enum Command {
     /// Run the triage daemon: poll, filter, act, then repeat.
     Run {
         /// Path to the configuration file.
+        #[arg(long, default_value = "berger.yaml")]
+        config: String,
+    },
+
+    /// Print the full triage decision chain of one message: its tags, the
+    /// filters and LLM decision behind them, the actions and webhooks.
+    Explain {
+        /// RFC 822 Message-ID of the message to explain.
+        message_id: String,
+        /// Path to the configuration file (used to locate the sidecar).
         #[arg(long, default_value = "berger.yaml")]
         config: String,
     },
@@ -62,6 +74,7 @@ impl Cli {
     pub async fn dispatch(self) -> anyhow::Result<()> {
         match self.command {
             Command::Run { config } => run::run(&config).await,
+            Command::Explain { message_id, config } => explain::run(&config, &message_id),
             Command::ExportThunderbird {
                 config,
                 account,
