@@ -34,8 +34,10 @@ the classification to tags, then the per-tag IMAP actions and webhooks.
 
 ## Status
 
-Berger **v0.1.0** is the first release. The functional and technical
-specification is [`docs/PRD.md`](docs/PRD.md); release notes are in the
+Berger **v0.2.1** is the current release: v0.1.0 shipped the triage daemon,
+and v0.2.0 added the read-only `berger scan` configuration bootstrapper. The
+specification is in [`docs/PRD.md`](docs/PRD.md) and
+[`docs/PRD-v1.1.md`](docs/PRD-v1.1.md); release notes are in the
 [changelog](CHANGELOG.md).
 
 ## Quickstart
@@ -80,15 +82,54 @@ trust the triage.
 To run Berger outside Docker, see [`docs/ops.md`](docs/ops.md) for a
 `cargo build --release` and a systemd unit.
 
+## Bootstrapping a configuration with `berger scan`
+
+Writing the `filters:` section from a blank page is the hard part.
+`berger scan` does the first draft for you: it reads a mailbox **strictly
+read-only** — no IMAP action, no LLM call, never a message body — measures
+ten dimensions of it, and writes a suggested configuration you review
+before using.
+
+```sh
+berger scan --since 150d     # analyse the last 150 days of every account
+```
+
+It writes a timestamped `berger-scan-<timestamp>.yaml` — a *suggestion*, it
+never touches your real `berger.yaml` — plus a JSON copy and a text report.
+
+**Factored suggestions.** The scan does not emit one rule per sender it
+sees. It factors its findings into a handful of category-level rules: one
+native `list_unsubscribe` rule for all newsletters, one `header_match` on
+`List-Id` for all mailing lists, one `sender_in` list for notification
+services, one for your two-way ("VIP") contacts, one `header_match` for
+spam. Frequent senders and domains are reported but not turned into rules —
+a frequent sender is not a triage category, and grouping domains into
+themes (vendor, public sector, …) is a judgement left to you or the LLM.
+
+**The process, end to end:**
+
+1. **Scan** — `berger scan --since 150d`. Read-only; changes nothing.
+2. **Review** — open `berger-scan-<timestamp>.yaml`. Every rule carries its
+   evidence and a confidence score as comments.
+3. **Merge** — copy the rules you keep into your `berger.yaml`, and add the
+   matching `actions:` entries for their tags.
+4. **Dry-run** — `berger dry-run` prints what those rules would tag,
+   applying nothing.
+5. **Activate** — `berger run` starts the daemon. The first real run uses
+   `copy_to` only; switch tags to `move_to` once you trust the triage.
+
+Full reference: [`docs/scan.md`](docs/scan.md).
+
 ## CLI
 
-The single `berger` binary exposes five subcommands. Each reads the same
+The single `berger` binary exposes six subcommands. Each reads the same
 `berger.yaml` (`--config`, default `berger.yaml`).
 
 | Command | What it does |
 |---|---|
 | `berger run` | Run the triage daemon: poll, filter, act, repeat. Also serves the WebUI on port 7000. |
 | `berger dry-run` | Run one poll cycle applying **no** IMAP action and recording nothing — print the tags and actions Berger would apply. Native filters only. |
+| `berger scan` | Analyse a mailbox **read-only** and suggest a starting `berger.yaml` — no IMAP action, no LLM call, never a message body. See [Bootstrapping](#bootstrapping-a-configuration-with-berger-scan). |
 | `berger explain <message-id>` | Reconstruct the full decision chain of one processed message: tags, the filters and LLM decision behind them, the IMAP actions, the webhooks. |
 | `berger status` | Print a health and statistics summary of the sidecar: messages processed, LLM cost, IMAP-action and webhook success rates, table counts. |
 | `berger export-thunderbird` | Export the `actions:` configuration as a Mozilla Thunderbird `msgFilterRules.dat` ruleset, so the same foldering can run client-side. |
