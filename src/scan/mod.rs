@@ -30,4 +30,5 @@ pub mod address;
 pub mod analyzer;
 pub mod analyzers;
 pub mod folders;
+pub mod headers;
 pub mod source;
