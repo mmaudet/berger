@@ -98,6 +98,15 @@ enum Command {
         /// to every configured account.
         #[arg(long)]
         account: Option<String>,
+        /// What to write: the text report, the suggested YAML, or both.
+        #[arg(long, value_enum, default_value = "all")]
+        format: scan::ScanFormat,
+        /// Path for the suggested-config YAML; defaults to a timestamped file.
+        #[arg(long)]
+        output: Option<String>,
+        /// Minimum messages backing a suggestion (PRD v1.1 §4.4).
+        #[arg(long, default_value_t = 5)]
+        min_evidence: usize,
     },
 }
 
@@ -121,7 +130,20 @@ impl Cli {
                 config,
                 since,
                 account,
-            } => scan::run(&config, &since, account.as_deref()).await,
+                format,
+                output,
+                min_evidence,
+            } => {
+                scan::run(
+                    &config,
+                    &since,
+                    account.as_deref(),
+                    format,
+                    output.as_deref(),
+                    min_evidence,
+                )
+                .await
+            }
         }
     }
 }

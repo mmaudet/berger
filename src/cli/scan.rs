@@ -16,31 +16,47 @@
 
 //! The `scan` command (PRD v1.1): a strictly read-only analysis of the
 //! inbox. It fetches recent envelopes from Bichon, measures the recurring
-//! patterns in them, and prints a summary — a starting point for writing
-//! `berger.yaml`. It applies no IMAP action and never calls the LLM.
+//! patterns in them, derives candidate configuration rules, and writes a
+//! report. It applies no IMAP action and never calls the LLM.
 
 use anyhow::Context;
 
 use crate::config::BergerConfig;
 use crate::ingest::bichon_client::BichonClient;
-use crate::scan::analyzer::ScanReport;
+use crate::scan::formatter::{render_text, render_yaml};
 use crate::scan::runner::scan;
+use crate::scan::suggester::suggest;
 
 /// Milliseconds in one day, for turning a `--since` day count into a
 /// `Date:` lower bound.
 const MILLIS_PER_DAY: i64 = 86_400_000;
 
-/// How many rows per dimension the summary prints.
-const SUMMARY_ROWS: usize = 10;
+/// What `berger scan` writes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum ScanFormat {
+    /// The human-readable report, on stdout.
+    Text,
+    /// The suggested-configuration YAML, written to a file.
+    Yaml,
+    /// Both: the text report on stdout and the suggested YAML file.
+    All,
+}
 
 /// Loads the configuration, scans the inbox read-only over the `--since`
-/// window, and prints a summary.
+/// window, derives suggestions, and writes the requested output(s).
 ///
 /// # Errors
 /// Returns an error if `--since` is malformed, the configuration cannot be
 /// loaded, the Bichon client cannot be built, an account name is unknown,
-/// or the scan fails.
-pub async fn run(config_path: &str, since: &str, account: Option<&str>) -> anyhow::Result<()> {
+/// the scan fails, or the YAML file cannot be written.
+pub async fn run(
+    config_path: &str,
+    since: &str,
+    account: Option<&str>,
+    format: ScanFormat,
+    output: Option<&str>,
+    min_evidence: usize,
+) -> anyhow::Result<()> {
     let days = parse_since(since).map_err(anyhow::Error::msg)?;
     let config = BergerConfig::load(config_path).context("loading the configuration")?;
 
@@ -56,14 +72,28 @@ pub async fn run(config_path: &str, since: &str, account: Option<&str>) -> anyho
     let report = scan(&bichon, &account_ids, since_ms)
         .await
         .context("scanning the inbox")?;
-
     if report.sent_messages == 0 {
         tracing::warn!(
             "no Sent mail found in the scan window; the bidirectional dimension is skipped"
         );
     }
+    let suggestions = suggest(&report, min_evidence);
 
-    print!("{}", render_summary(&report, days));
+    if matches!(format, ScanFormat::Text | ScanFormat::All) {
+        print!("{}", render_text(&report, &suggestions, days));
+    }
+    if matches!(format, ScanFormat::Yaml | ScanFormat::All) {
+        let path = output.map_or_else(
+            || format!("berger-scan-{}.yaml", now_epoch_ms()),
+            str::to_string,
+        );
+        std::fs::write(&path, render_yaml(&report, &suggestions, days))
+            .with_context(|| format!("writing the suggestions to `{path}`"))?;
+        println!(
+            "Wrote {} suggestion(s) to {path}",
+            suggestions.filters.len()
+        );
+    }
     Ok(())
 }
 
@@ -118,60 +148,9 @@ fn resolve_account_ids(config: &BergerConfig, account: Option<&str>) -> anyhow::
         .collect()
 }
 
-/// Renders a short, human-readable summary of a [`ScanReport`].
-fn render_summary(report: &ScanReport, days: u32) -> String {
-    let mut out = String::new();
-    out.push_str("Berger scan — read-only inbox analysis.\n");
-    out.push_str("No IMAP action applied, no LLM call, no message body read.\n\n");
-    out.push_str(&format!("Window:            last {days} days\n"));
-    out.push_str(&format!(
-        "Messages analyzed: {} ({} inbox, {} sent)\n",
-        report.messages_analyzed, report.inbox_messages, report.sent_messages
-    ));
-
-    out.push_str("\nTop senders\n");
-    if report.top_senders.is_empty() {
-        out.push_str("  (none)\n");
-    }
-    for sender in report.top_senders.iter().take(SUMMARY_ROWS) {
-        out.push_str(&format!(
-            "  {:>6}  {}\n",
-            sender.messages_received, sender.address
-        ));
-    }
-
-    out.push_str("\nTop domains\n");
-    if report.top_domains.is_empty() {
-        out.push_str("  (none)\n");
-    }
-    for domain in report.top_domains.iter().take(SUMMARY_ROWS) {
-        out.push_str(&format!(
-            "  {:>6}  {}\n",
-            domain.messages_received, domain.domain
-        ));
-    }
-
-    out.push_str("\nBidirectional contacts\n");
-    if report.sent_messages == 0 {
-        out.push_str("  (no Sent mail in the window — dimension skipped)\n");
-    } else if report.bidirectional.is_empty() {
-        out.push_str("  (none)\n");
-    }
-    for contact in report.bidirectional.iter().take(SUMMARY_ROWS) {
-        out.push_str(&format!(
-            "  {:>4} recv / {:>4} sent  {}\n",
-            contact.messages_received, contact.messages_sent_to, contact.address
-        ));
-    }
-
-    out
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::scan::analyzers::senders::{BidirectionalContact, DomainCount, SenderCount};
-    use crate::scan::analyzers::spam::SpamSummary;
 
     const TWO_ACCOUNTS: &str = r#"
 bichon:
@@ -193,21 +172,6 @@ accounts:
       user: "berger@gmail.com"
       password: "pw2"
 "#;
-
-    fn empty_report() -> ScanReport {
-        ScanReport {
-            messages_analyzed: 0,
-            inbox_messages: 0,
-            sent_messages: 0,
-            top_senders: Vec::new(),
-            top_domains: Vec::new(),
-            bidirectional: Vec::new(),
-            newsletters: Vec::new(),
-            mailing_lists: Vec::new(),
-            notification_services: Vec::new(),
-            spam: SpamSummary::default(),
-        }
-    }
 
     #[test]
     fn parse_since_reads_a_day_count() {
@@ -257,64 +221,5 @@ accounts:
         let yaml = TWO_ACCOUNTS.replace("\"111\"", "\"not-a-number\"");
         let config = BergerConfig::parse(&yaml).unwrap();
         assert!(resolve_account_ids(&config, None).is_err());
-    }
-
-    #[test]
-    fn summary_states_the_read_only_guarantee() {
-        let text = render_summary(&empty_report(), 30);
-        assert!(text.contains("read-only"));
-        assert!(text.contains("No IMAP action"));
-        assert!(text.contains("no LLM call"));
-    }
-
-    #[test]
-    fn summary_reports_the_analyzed_volume() {
-        let mut report = empty_report();
-        report.messages_analyzed = 50;
-        report.inbox_messages = 42;
-        report.sent_messages = 8;
-        let text = render_summary(&report, 30);
-        assert!(text.contains("50"));
-        assert!(text.contains("42 inbox"));
-        assert!(text.contains("8 sent"));
-    }
-
-    #[test]
-    fn summary_lists_top_senders_and_domains() {
-        let mut report = empty_report();
-        report.top_senders = vec![SenderCount {
-            address: "noreply@github.com".to_string(),
-            messages_received: 284,
-        }];
-        report.top_domains = vec![DomainCount {
-            domain: "github.com".to_string(),
-            messages_received: 284,
-        }];
-        let text = render_summary(&report, 30);
-        assert!(text.contains("noreply@github.com"));
-        assert!(text.contains("github.com"));
-        assert!(text.contains("284"));
-    }
-
-    #[test]
-    fn summary_notes_a_missing_sent_folder() {
-        let text = render_summary(&empty_report(), 30);
-        assert!(text.contains("skipped"));
-    }
-
-    #[test]
-    fn summary_shows_bidirectional_contacts() {
-        let mut report = empty_report();
-        report.sent_messages = 5;
-        report.bidirectional = vec![BidirectionalContact {
-            address: "partner@x.test".to_string(),
-            messages_received: 47,
-            messages_sent_to: 23,
-            bidirectional_ratio: 0.49,
-        }];
-        let text = render_summary(&report, 30);
-        assert!(text.contains("partner@x.test"));
-        assert!(text.contains("47"));
-        assert!(text.contains("23"));
     }
 }
