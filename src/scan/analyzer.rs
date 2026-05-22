@@ -19,11 +19,14 @@
 //! [`ScanReport`].
 
 use crate::ingest::types::Envelope;
+use crate::scan::analyzers::language::{self, LanguageShare};
 use crate::scan::analyzers::lists::{self, MailingList};
 use crate::scan::analyzers::newsletters::{self, NewsletterDomain};
 use crate::scan::analyzers::notifications::{self, NotificationService};
 use crate::scan::analyzers::senders::{self, BidirectionalContact, DomainCount, SenderCount};
 use crate::scan::analyzers::spam::{self, SpamSummary};
+use crate::scan::analyzers::subjects::{self, SubjectNgram};
+use crate::scan::analyzers::volume::{self, VolumeProfile};
 use crate::scan::folders::{FolderClass, classify_folder};
 use crate::scan::headers::ScanHeaders;
 
@@ -61,6 +64,12 @@ pub struct ScanReport {
     pub notification_services: Vec<NotificationService>,
     /// Dimension 7: the observed spam-signal summary.
     pub spam: SpamSummary,
+    /// Dimension 8: the recurring subject phrases.
+    pub subject_ngrams: Vec<SubjectNgram>,
+    /// Dimension 9: the inbox's languages, by share.
+    pub languages: Vec<LanguageShare>,
+    /// Dimension 10: the hourly-volume profile.
+    pub volume: VolumeProfile,
 }
 
 /// Splits fetched envelopes by folder into `(inbox, sent)`: the INBOX
@@ -93,6 +102,9 @@ pub fn analyze(inbox: &[ScannedMessage], sent: &[&Envelope]) -> ScanReport {
         mailing_lists: lists::detect_mailing_lists(inbox),
         notification_services: notifications::detect_notification_services(inbox),
         spam: spam::analyze_spam(inbox),
+        subject_ngrams: subjects::top_subject_ngrams(&inbox_envelopes),
+        languages: language::detect_languages(&inbox_envelopes),
+        volume: volume::analyze_volume(&inbox_envelopes),
     }
 }
 
@@ -259,5 +271,25 @@ mod tests {
             "dimension 6 should be wired"
         );
         assert_eq!(report.spam.flagged, 1, "dimension 7 should be wired");
+    }
+
+    #[test]
+    fn analyze_runs_the_envelope_dimensions() {
+        let mut first = envelope("INBOX", "a@x.test", &[]);
+        first.subject = "quarterly invoice ready".to_string();
+        let mut second = envelope("INBOX", "b@x.test", &[]);
+        second.subject = "quarterly invoice attached".to_string();
+        let envs = [first, second];
+        let inbox: Vec<ScannedMessage> = envs.iter().map(scanned).collect();
+        let report = analyze(&inbox, &[]);
+        assert!(
+            !report.subject_ngrams.is_empty(),
+            "dimension 8 should be wired"
+        );
+        assert_eq!(
+            report.volume.hourly.len(),
+            24,
+            "dimension 10 should be wired"
+        );
     }
 }

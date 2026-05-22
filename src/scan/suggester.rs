@@ -220,6 +220,7 @@ mod tests {
     use crate::scan::analyzers::newsletters::NewsletterDomain;
     use crate::scan::analyzers::senders::DomainCount;
     use crate::scan::analyzers::spam::SpamSummary;
+    use crate::scan::analyzers::volume::VolumeProfile;
 
     fn empty_report() -> ScanReport {
         ScanReport {
@@ -233,6 +234,9 @@ mod tests {
             mailing_lists: Vec::new(),
             notification_services: Vec::new(),
             spam: SpamSummary::default(),
+            subject_ngrams: Vec::new(),
+            languages: Vec::new(),
+            volume: VolumeProfile::default(),
         }
     }
 

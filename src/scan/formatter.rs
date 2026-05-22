@@ -175,6 +175,7 @@ mod tests {
     use crate::scan::analyzer::ScanReport;
     use crate::scan::analyzers::senders::SenderCount;
     use crate::scan::analyzers::spam::SpamSummary;
+    use crate::scan::analyzers::volume::VolumeProfile;
     use crate::scan::suggester::SuggestedFilter;
 
     fn empty_report() -> ScanReport {
@@ -189,6 +190,9 @@ mod tests {
             mailing_lists: Vec::new(),
             notification_services: Vec::new(),
             spam: SpamSummary::default(),
+            subject_ngrams: Vec::new(),
+            languages: Vec::new(),
+            volume: VolumeProfile::default(),
         }
     }
 
