@@ -18,7 +18,12 @@
 
 use clap::{Parser, Subcommand};
 
+mod db;
+pub mod dry_run;
+pub mod explain;
+pub mod export_thunderbird;
 mod run;
+pub mod status;
 
 /// The Berger command-line interface.
 #[derive(Debug, Parser)]
@@ -37,6 +42,46 @@ enum Command {
         #[arg(long, default_value = "berger.yaml")]
         config: String,
     },
+
+    /// Print the full triage decision chain of one message: its tags, the
+    /// filters and LLM decision behind them, the actions and webhooks.
+    Explain {
+        /// RFC 822 Message-ID of the message to explain.
+        message_id: String,
+        /// Path to the configuration file (used to locate the sidecar).
+        #[arg(long, default_value = "berger.yaml")]
+        config: String,
+    },
+
+    /// Print a health and statistics summary of the sidecar: messages
+    /// processed, recent activity, LLM cost, and table counts.
+    Status {
+        /// Path to the configuration file (used to locate the sidecar).
+        #[arg(long, default_value = "berger.yaml")]
+        config: String,
+    },
+
+    /// Run one poll cycle without applying any IMAP action or recording
+    /// anything — print the tags and actions Berger would apply.
+    DryRun {
+        /// Path to the configuration file.
+        #[arg(long, default_value = "berger.yaml")]
+        config: String,
+    },
+
+    /// Export the `actions:` configuration as a Mozilla Thunderbird
+    /// `msgFilterRules.dat` ruleset, printed to stdout.
+    ExportThunderbird {
+        /// Path to the configuration file.
+        #[arg(long, default_value = "berger.yaml")]
+        config: String,
+        /// Account name to export rules for; defaults to the first account.
+        #[arg(long)]
+        account: Option<String>,
+        /// File to write the ruleset to; prints to stdout when omitted.
+        #[arg(long)]
+        output: Option<String>,
+    },
 }
 
 impl Cli {
@@ -47,6 +92,14 @@ impl Cli {
     pub async fn dispatch(self) -> anyhow::Result<()> {
         match self.command {
             Command::Run { config } => run::run(&config).await,
+            Command::Explain { message_id, config } => explain::run(&config, &message_id),
+            Command::Status { config } => status::run(&config),
+            Command::DryRun { config } => dry_run::run(&config).await,
+            Command::ExportThunderbird {
+                config,
+                account,
+                output,
+            } => export_thunderbird::run(&config, account.as_deref(), output.as_deref()),
         }
     }
 }
