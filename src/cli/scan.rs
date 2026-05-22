@@ -23,7 +23,7 @@ use anyhow::Context;
 
 use crate::config::BergerConfig;
 use crate::ingest::bichon_client::BichonClient;
-use crate::scan::formatter::{render_text, render_yaml};
+use crate::scan::formatter::{render_json, render_text, render_yaml};
 use crate::scan::runner::scan;
 use crate::scan::suggester::suggest;
 
@@ -38,7 +38,9 @@ pub enum ScanFormat {
     Text,
     /// The suggested-configuration YAML, written to a file.
     Yaml,
-    /// Both: the text report on stdout and the suggested YAML file.
+    /// The full scan as a JSON document, written to a file.
+    Json,
+    /// Everything: the text report on stdout, plus the YAML and JSON files.
     All,
 }
 
@@ -48,7 +50,7 @@ pub enum ScanFormat {
 /// # Errors
 /// Returns an error if `--since` is malformed, the configuration cannot be
 /// loaded, the Bichon client cannot be built, an account name is unknown,
-/// the scan fails, or the YAML file cannot be written.
+/// the scan fails, or an output file cannot be written.
 pub async fn run(
     config_path: &str,
     since: &str,
@@ -83,16 +85,19 @@ pub async fn run(
         print!("{}", render_text(&report, &suggestions, days));
     }
     if matches!(format, ScanFormat::Yaml | ScanFormat::All) {
-        let path = output.map_or_else(
-            || format!("berger-scan-{}.yaml", now_epoch_ms()),
-            str::to_string,
-        );
+        let path = output_path(format, output, "yaml");
         std::fs::write(&path, render_yaml(&report, &suggestions, days))
             .with_context(|| format!("writing the suggestions to `{path}`"))?;
         println!(
             "Wrote {} suggestion(s) to {path}",
             suggestions.filters.len()
         );
+    }
+    if matches!(format, ScanFormat::Json | ScanFormat::All) {
+        let path = output_path(format, output, "json");
+        std::fs::write(&path, render_json(&report, &suggestions, days))
+            .with_context(|| format!("writing the JSON report to `{path}`"))?;
+        println!("Wrote the JSON report to {path}");
     }
     Ok(())
 }
@@ -103,6 +108,19 @@ fn now_epoch_ms() -> i64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|elapsed| elapsed.as_millis() as i64)
         .unwrap_or(0)
+}
+
+/// The path to write a single output format to: the explicit `--output`
+/// when exactly one file format was requested, otherwise a timestamped
+/// file with the given extension. `--format all` writes more than one
+/// file, so `--output` cannot name them — a timestamped path is used.
+fn output_path(format: ScanFormat, output: Option<&str>, extension: &str) -> String {
+    match (format, output) {
+        (ScanFormat::All, _) | (_, None) => {
+            format!("berger-scan-{}.{extension}", now_epoch_ms())
+        }
+        (_, Some(path)) => path.to_string(),
+    }
 }
 
 /// Parses a `--since` value such as `30d` into a number of days.
@@ -221,5 +239,27 @@ accounts:
         let yaml = TWO_ACCOUNTS.replace("\"111\"", "\"not-a-number\"");
         let config = BergerConfig::parse(&yaml).unwrap();
         assert!(resolve_account_ids(&config, None).is_err());
+    }
+
+    #[test]
+    fn output_path_uses_the_explicit_output_for_a_single_format() {
+        assert_eq!(
+            output_path(ScanFormat::Yaml, Some("rules.yaml"), "yaml"),
+            "rules.yaml"
+        );
+    }
+
+    #[test]
+    fn output_path_falls_back_to_a_timestamped_name() {
+        let path = output_path(ScanFormat::Json, None, "json");
+        assert!(path.starts_with("berger-scan-"));
+        assert!(path.ends_with(".json"));
+    }
+
+    #[test]
+    fn output_path_ignores_explicit_output_for_format_all() {
+        // `all` writes more than one file, so a single --output cannot name them.
+        let path = output_path(ScanFormat::All, Some("rules.yaml"), "yaml");
+        assert!(path.starts_with("berger-scan-"));
     }
 }

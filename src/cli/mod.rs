@@ -98,10 +98,10 @@ enum Command {
         /// to every configured account.
         #[arg(long)]
         account: Option<String>,
-        /// What to write: the text report, the suggested YAML, or both.
+        /// What to write: the text report, the YAML, the JSON, or all of them.
         #[arg(long, value_enum, default_value = "all")]
         format: scan::ScanFormat,
-        /// Path for the suggested-config YAML; defaults to a timestamped file.
+        /// Output file path for a single format; defaults to a timestamped file.
         #[arg(long)]
         output: Option<String>,
         /// Minimum messages backing a suggestion (PRD v1.1 §4.4).
