@@ -23,6 +23,7 @@ use crate::storage::executed_actions::ExecutedActionRepository;
 use crate::storage::filter_matches::FilterMatchRepository;
 use crate::storage::llm_decisions::LlmDecisionRepository;
 use crate::storage::processed_messages::ProcessedMessageRepository;
+use crate::storage::scan_reports::ScanReportRepository;
 use crate::storage::webhook_emissions::WebhookEmissionRepository;
 
 mod embedded {
@@ -88,6 +89,11 @@ impl Database {
     pub fn webhook_emissions(&self) -> WebhookEmissionRepository<'_> {
         WebhookEmissionRepository::new(&self.conn)
     }
+
+    /// Returns a repository over the `scan_reports` table.
+    pub fn scan_reports(&self) -> ScanReportRepository<'_> {
+        ScanReportRepository::new(&self.conn)
+    }
 }
 
 #[cfg(test)]
@@ -107,7 +113,7 @@ mod tests {
     }
 
     #[test]
-    fn open_in_memory_creates_the_seven_tables() {
+    fn open_in_memory_creates_the_eight_tables() {
         let db = Database::open(":memory:").unwrap();
         let mut stmt = db
             .connection()
@@ -128,6 +134,7 @@ mod tests {
                 "filter_matches",
                 "llm_decisions",
                 "processed_messages",
+                "scan_reports",
                 "webhook_emissions",
             ]
         );

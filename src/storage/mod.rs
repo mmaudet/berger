@@ -25,4 +25,5 @@ pub mod executed_actions;
 pub mod filter_matches;
 pub mod llm_decisions;
 pub mod processed_messages;
+pub mod scan_reports;
 pub mod webhook_emissions;
