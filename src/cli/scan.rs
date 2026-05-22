@@ -23,7 +23,8 @@ use anyhow::Context;
 
 use crate::config::BergerConfig;
 use crate::ingest::bichon_client::BichonClient;
-use crate::scan::analyzer::{ScanReport, analyze};
+use crate::scan::analyzer::{ScanReport, ScannedMessage, analyze, partition};
+use crate::scan::headers::ScanHeaders;
 use crate::scan::source::fetch_window;
 
 /// Milliseconds in one day, for turning a `--since` day count into a
@@ -56,7 +57,15 @@ pub async fn run(config_path: &str, since: &str, account: Option<&str>) -> anyho
     let envelopes = fetch_window(&bichon, &account_ids, since_ms)
         .await
         .context("scanning the inbox")?;
-    let report = analyze(&envelopes);
+    let (inbox_envelopes, sent) = partition(&envelopes);
+    let inbox: Vec<ScannedMessage> = inbox_envelopes
+        .iter()
+        .map(|&envelope| ScannedMessage {
+            envelope,
+            headers: ScanHeaders::default(),
+        })
+        .collect();
+    let report = analyze(&inbox, &sent);
 
     if report.sent_messages == 0 {
         tracing::warn!(
