@@ -26,5 +26,6 @@
 //! exclusively through [`source::ReadOnlyMessageSource`], a trait with no
 //! mutating method, so the read-only guarantee holds at compile time.
 
+pub mod address;
 pub mod analyzers;
 pub mod source;
