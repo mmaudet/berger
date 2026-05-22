@@ -90,7 +90,10 @@ mod tests {
             subject: String::new(),
             preview: String::new(),
             from: from.to_string(),
-            to: to.iter().map(|recipient| (*recipient).to_string()).collect(),
+            to: to
+                .iter()
+                .map(|recipient| (*recipient).to_string())
+                .collect(),
             cc: Vec::new(),
             bcc: Vec::new(),
             date: 0,

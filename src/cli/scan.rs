@@ -82,9 +82,9 @@ fn parse_since(spec: &str) -> Result<u32, String> {
     let digits = spec
         .strip_suffix('d')
         .ok_or_else(|| format!("invalid --since `{spec}`: expected a day count such as `30d`"))?;
-    let days: u32 = digits
-        .parse()
-        .map_err(|_| format!("invalid --since `{spec}`: `{digits}` is not a whole number of days"))?;
+    let days: u32 = digits.parse().map_err(|_| {
+        format!("invalid --since `{spec}`: `{digits}` is not a whole number of days")
+    })?;
     if days == 0 {
         return Err(format!(
             "invalid --since `{spec}`: the window must be at least one day"
