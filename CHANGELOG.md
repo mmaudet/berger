@@ -5,6 +5,19 @@ All notable changes to Berger are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] - 2026-05-22
+
+### Changed
+
+- `berger scan` now suggests one factored rule per triage category instead
+  of one rule per observed entity. Newsletters collapse into a single
+  native `list_unsubscribe` rule, mailing lists into a generic
+  `header_match` on `List-Id`, and notification services and two-way
+  contacts into one `sender_in` list each. The pure-frequency dimensions —
+  top senders, top domains — are reported but no longer turned into rules.
+  A scan that previously emitted dozens of per-entity rules now yields a
+  handful of reviewable ones.
+
 ## [0.2.0] - 2026-05-22
 
 Adds `berger scan` — a strictly read-only inbox analysis that observes ten
@@ -82,5 +95,6 @@ never alters message content, and never phones home.
 - Reference documentation: `README`, `docs/yaml.md`, `docs/webhooks.md`,
   `docs/bichon-setup.md`, `docs/ops.md` and `berger.example.yaml`.
 
+[0.2.1]: https://github.com/mmaudet/berger/releases/tag/v0.2.1
 [0.2.0]: https://github.com/mmaudet/berger/releases/tag/v0.2.0
 [0.1.0]: https://github.com/mmaudet/berger/releases/tag/v0.1.0
