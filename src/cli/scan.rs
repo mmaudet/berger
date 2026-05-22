@@ -26,6 +26,8 @@ use crate::ingest::bichon_client::BichonClient;
 use crate::scan::formatter::{render_json, render_text, render_yaml};
 use crate::scan::runner::scan;
 use crate::scan::suggester::suggest;
+use crate::storage::database::Database;
+use crate::storage::scan_reports::ScanReportRow;
 
 /// Milliseconds in one day, for turning a `--since` day count into a
 /// `Date:` lower bound.
@@ -50,7 +52,7 @@ pub enum ScanFormat {
 /// # Errors
 /// Returns an error if `--since` is malformed, the configuration cannot be
 /// loaded, the Bichon client cannot be built, an account name is unknown,
-/// the scan fails, or an output file cannot be written.
+/// the scan fails, or an output file or the sidecar cannot be written.
 pub async fn run(
     config_path: &str,
     since: &str,
@@ -58,6 +60,7 @@ pub async fn run(
     format: ScanFormat,
     output: Option<&str>,
     min_evidence: usize,
+    save_report: bool,
 ) -> anyhow::Result<()> {
     let days = parse_since(since).map_err(anyhow::Error::msg)?;
     let config = BergerConfig::load(config_path).context("loading the configuration")?;
@@ -98,6 +101,23 @@ pub async fn run(
         std::fs::write(&path, render_json(&report, &suggestions, days))
             .with_context(|| format!("writing the JSON report to `{path}`"))?;
         println!("Wrote the JSON report to {path}");
+    }
+
+    if save_report {
+        let database =
+            Database::open(&config.database.path).context("opening the sidecar database")?;
+        let row = ScanReportRow {
+            period_days: days,
+            messages_analyzed: report.messages_analyzed,
+            report_json: serde_json::to_string(&report).context("serializing the scan report")?,
+            suggestions_json: serde_json::to_string(&suggestions)
+                .context("serializing the suggestions")?,
+        };
+        let id = database
+            .scan_reports()
+            .save(&row)
+            .context("saving the scan report")?;
+        println!("Saved scan report #{id} to the sidecar database.");
     }
     Ok(())
 }

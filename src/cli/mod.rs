@@ -107,6 +107,9 @@ enum Command {
         /// Minimum messages backing a suggestion (PRD v1.1 §4.4).
         #[arg(long, default_value_t = 5)]
         min_evidence: usize,
+        /// Also persist the run to the sidecar's scan_reports table.
+        #[arg(long)]
+        save_report: bool,
     },
 }
 
@@ -133,6 +136,7 @@ impl Cli {
                 format,
                 output,
                 min_evidence,
+                save_report,
             } => {
                 scan::run(
                     &config,
@@ -141,6 +145,7 @@ impl Cli {
                     format,
                     output.as_deref(),
                     min_evidence,
+                    save_report,
                 )
                 .await
             }
