@@ -22,6 +22,7 @@ pub mod error;
 use serde::Deserialize;
 
 use crate::config::error::ConfigError;
+use crate::webhooks::config::WebhookConfig;
 
 /// A secret string (an API token) whose `Debug` never reveals its value.
 #[derive(Clone, PartialEq, Eq, Deserialize)]
@@ -56,6 +57,9 @@ pub struct BergerConfig {
     /// The LLM classifier (PRD §5.3). `None` when the section is absent.
     #[serde(default)]
     pub llm: Option<LlmConfig>,
+    /// Named webhook endpoints (PRD §5.6). Empty when the section is absent.
+    #[serde(default)]
+    pub webhooks: Vec<WebhookConfig>,
 }
 
 /// How to reach the upstream Bichon instance.
@@ -271,6 +275,18 @@ impl BergerConfig {
         if let Some(llm) = &self.llm {
             require_non_empty(&llm.endpoint, "llm.endpoint")?;
             require_non_empty(&llm.model, "llm.model")?;
+        }
+
+        let mut seen_webhooks = std::collections::HashSet::new();
+        for webhook in &self.webhooks {
+            require_non_empty(&webhook.name, "webhook.name")?;
+            require_non_empty(&webhook.url, "webhook.url")?;
+            if !seen_webhooks.insert(webhook.name.as_str()) {
+                return Err(ConfigError::Validation(format!(
+                    "duplicate webhook name `{}`",
+                    webhook.name
+                )));
+            }
         }
 
         Ok(())
@@ -614,5 +630,32 @@ accounts:
         );
         let config = BergerConfig::parse(&yaml).unwrap();
         assert_eq!(config.llm.unwrap().categories, ["work", "perso"]);
+    }
+
+    #[test]
+    fn parses_the_webhooks_section() {
+        let yaml = format!(
+            "{VALID_YAML}\nwebhooks:\n  - name: \"hermes\"\n    url: \"https://hooks.example/h\"\n"
+        );
+        let config = BergerConfig::parse(&yaml).unwrap();
+        assert_eq!(config.webhooks.len(), 1);
+        assert_eq!(config.webhooks[0].name, "hermes");
+        assert_eq!(config.webhooks[0].url, "https://hooks.example/h");
+    }
+
+    #[test]
+    fn the_webhooks_section_is_optional() {
+        assert!(BergerConfig::parse(VALID_YAML).unwrap().webhooks.is_empty());
+    }
+
+    #[test]
+    fn duplicate_webhook_names_are_rejected() {
+        let yaml = format!(
+            "{VALID_YAML}\nwebhooks:\n  - name: \"dup\"\n    url: \"https://a.test\"\n  - name: \"dup\"\n    url: \"https://b.test\"\n"
+        );
+        assert!(matches!(
+            BergerConfig::parse(&yaml).unwrap_err(),
+            ConfigError::Validation(_)
+        ));
     }
 }

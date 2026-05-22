@@ -30,6 +30,7 @@ use crate::llm::LlmClient;
 use crate::llm::classifier::Classifier;
 use crate::pipeline::{Pipeline, ProcessOutcome, compile_filters};
 use crate::storage::database::Database;
+use crate::webhooks::emitter::WebhookEmitter;
 use crate::webui::{self, AppState};
 
 /// How long to wait between poll cycles.
@@ -71,7 +72,12 @@ pub async fn run(config_path: &str) -> anyhow::Result<()> {
         }
         None => None,
     };
-    let pipeline = Pipeline::new(filters, config.actions.clone(), config_hash, classifier);
+    let mut pipeline = Pipeline::new(filters, config.actions.clone(), config_hash, classifier);
+    if !config.webhooks.is_empty() {
+        let emitter =
+            WebhookEmitter::new(config.webhooks.clone()).context("building the webhook emitter")?;
+        pipeline = pipeline.with_webhooks(emitter, config.bichon.base_url.clone());
+    }
 
     spawn_webui(&config.database.path, &raw);
 
