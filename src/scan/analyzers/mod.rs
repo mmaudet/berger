@@ -16,3 +16,5 @@
 
 //! Per-dimension analyzers (PRD v1.1 §4.2): each module computes one
 //! family of statistics over the scanned envelopes.
+
+pub mod senders;
