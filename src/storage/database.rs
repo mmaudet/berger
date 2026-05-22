@@ -20,6 +20,7 @@ use crate::storage::accounts::AccountRepository;
 use crate::storage::error::StorageError;
 use crate::storage::llm_decisions::LlmDecisionRepository;
 use crate::storage::processed_messages::ProcessedMessageRepository;
+use crate::storage::webhook_emissions::WebhookEmissionRepository;
 
 mod embedded {
     refinery::embed_migrations!("migrations");
@@ -63,6 +64,11 @@ impl Database {
     /// Returns a repository over the `llm_decisions` table.
     pub fn llm_decisions(&self) -> LlmDecisionRepository<'_> {
         LlmDecisionRepository::new(&self.conn)
+    }
+
+    /// Returns a repository over the `webhook_emissions` table.
+    pub fn webhook_emissions(&self) -> WebhookEmissionRepository<'_> {
+        WebhookEmissionRepository::new(&self.conn)
     }
 }
 
