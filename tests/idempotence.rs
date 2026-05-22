@@ -142,6 +142,7 @@ async fn the_same_message_id_is_processed_only_once() {
     // A sender_in filter the test message matches, mapped to a copy action.
     let filters = vec![CompiledFilter {
         filter: NativeFilter::sender_in(vec!["github.com".to_string()]),
+        filter_type: "sender_in".to_string(),
         tag: "cat/test".to_string(),
     }];
     let mut actions = BTreeMap::new();

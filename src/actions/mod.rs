@@ -106,11 +106,15 @@ pub async fn ensure_folder_exists<T: ActionTarget>(
 
 /// Applies a message's consolidated actions (PRD §5.5): flags and copies
 /// run while the message is still in INBOX, the move runs last.
+///
+/// Returns the actions actually executed, after consolidation (deduplicated
+/// copies, `move_to` winning over `copy_to`, a single move), in execution
+/// order — so the caller can record exactly what happened.
 pub async fn apply_actions<T: ActionTarget>(
     target: &mut T,
     uid: u32,
     actions: &[Action],
-) -> Result<(), ActionError> {
+) -> Result<Vec<Action>, ActionError> {
     let mut copies: Vec<String> = Vec::new();
     let mut moves: Vec<String> = Vec::new();
     let mut mark_seen = false;
@@ -146,16 +150,20 @@ pub async fn apply_actions<T: ActionTarget>(
     });
 
     // Flags and copies run first — they need the message still in INBOX.
+    let mut executed: Vec<Action> = Vec::new();
     if mark_seen {
         target.add_flag(uid, Flag::Seen).await?;
+        executed.push(Action::MarkSeen);
     }
     if mark_flagged {
         target.add_flag(uid, Flag::Flagged).await?;
+        executed.push(Action::MarkFlagged);
     }
     for folder in &copies {
         let path = berger_folder(folder);
         ensure_folder_exists(target, &path).await?;
         target.copy_message(uid, &path).await?;
+        executed.push(Action::CopyTo(folder.clone()));
     }
 
     // The move runs last: UID MOVE removes the message from INBOX.
@@ -169,8 +177,9 @@ pub async fn apply_actions<T: ActionTarget>(
         let path = berger_folder(folder);
         ensure_folder_exists(target, &path).await?;
         target.move_message(uid, &path).await?;
+        executed.push(Action::MoveTo(folder.clone()));
     }
-    Ok(())
+    Ok(executed)
 }
 
 /// The full IMAP path of a Berger writeback folder.
@@ -334,6 +343,41 @@ mod tests {
             .unwrap();
         assert!(copy_at < move_at, "copy must run before move");
         assert!(flag_at < move_at, "flag must run before move");
+    }
+
+    #[tokio::test]
+    async fn apply_actions_returns_what_it_executed() {
+        let mut target = FakeTarget::new();
+        let executed = apply_actions(
+            &mut target,
+            1,
+            &[Action::CopyTo("work".to_string()), Action::MarkSeen],
+        )
+        .await
+        .unwrap();
+        // Execution order: flags run before copies.
+        assert_eq!(
+            executed,
+            [Action::MarkSeen, Action::CopyTo("work".to_string())]
+        );
+    }
+
+    #[tokio::test]
+    async fn apply_actions_returns_the_consolidated_set_not_the_raw_input() {
+        let mut target = FakeTarget::new();
+        // copy_to and move_to on the same folder: move_to wins, the copy is
+        // dropped — the returned list must reflect that.
+        let executed = apply_actions(
+            &mut target,
+            1,
+            &[
+                Action::CopyTo("urgent".to_string()),
+                Action::MoveTo("urgent".to_string()),
+            ],
+        )
+        .await
+        .unwrap();
+        assert_eq!(executed, [Action::MoveTo("urgent".to_string())]);
     }
 
     #[tokio::test]

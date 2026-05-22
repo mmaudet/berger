@@ -17,7 +17,10 @@
 //! The SQLite sidecar: connection, pragmas, and schema migrations.
 
 use crate::storage::accounts::AccountRepository;
+use crate::storage::applied_tags::AppliedTagRepository;
 use crate::storage::error::StorageError;
+use crate::storage::executed_actions::ExecutedActionRepository;
+use crate::storage::filter_matches::FilterMatchRepository;
 use crate::storage::llm_decisions::LlmDecisionRepository;
 use crate::storage::processed_messages::ProcessedMessageRepository;
 use crate::storage::webhook_emissions::WebhookEmissionRepository;
@@ -59,6 +62,21 @@ impl Database {
     /// Returns a repository over the `processed_messages` table.
     pub fn processed_messages(&self) -> ProcessedMessageRepository<'_> {
         ProcessedMessageRepository::new(&self.conn)
+    }
+
+    /// Returns a repository over the `applied_tags` table.
+    pub fn applied_tags(&self) -> AppliedTagRepository<'_> {
+        AppliedTagRepository::new(&self.conn)
+    }
+
+    /// Returns a repository over the `executed_actions` table.
+    pub fn executed_actions(&self) -> ExecutedActionRepository<'_> {
+        ExecutedActionRepository::new(&self.conn)
+    }
+
+    /// Returns a repository over the `filter_matches` table.
+    pub fn filter_matches(&self) -> FilterMatchRepository<'_> {
+        FilterMatchRepository::new(&self.conn)
     }
 
     /// Returns a repository over the `llm_decisions` table.

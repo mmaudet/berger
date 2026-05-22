@@ -24,12 +24,13 @@ use std::collections::{BTreeMap, HashSet};
 use berger::actions::error::ActionError;
 use berger::actions::{ActionTarget, Flag};
 use berger::config::TagActions;
+use berger::filters::NativeFilter;
 use berger::ingest::error::IngestError;
 use berger::ingest::source::MessageSource;
 use berger::ingest::types::{DataPage, EmailSearchRequest, Envelope, MinimalAccount};
 use berger::llm::LlmClient;
 use berger::llm::classifier::Classifier;
-use berger::pipeline::{Pipeline, ProcessOutcome};
+use berger::pipeline::{CompiledFilter, Pipeline, ProcessOutcome};
 use berger::storage::database::Database;
 use serde_json::json;
 use wiremock::matchers::method;
@@ -240,4 +241,93 @@ async fn an_llm_failure_tags_the_message_llm_error() {
         }
         ProcessOutcome::AlreadyProcessed => panic!("expected Processed"),
     }
+}
+
+#[tokio::test]
+async fn process_records_tags_actions_and_filter_matches_in_the_sidecar() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "choices": [{"message": {"role": "assistant", "content":
+                r#"{"category":"work","needs_reply":false,"priority":2}"#}}]
+        })))
+        .mount(&server)
+        .await;
+
+    let database = Database::open(":memory:").unwrap();
+    let account_id = database.accounts().insert("acct", "bichon-1").unwrap();
+
+    // A native filter the EML sender matches, with a copy action for its tag.
+    let filters = vec![CompiledFilter {
+        filter: NativeFilter::sender_in(vec!["example.test".to_string()]),
+        filter_type: "sender_in".to_string(),
+        tag: "cat/test".to_string(),
+    }];
+    let mut actions = BTreeMap::new();
+    actions.insert(
+        "cat/test".to_string(),
+        TagActions {
+            copy_to: Some("test".to_string()),
+            ..TagActions::default()
+        },
+    );
+    let pipeline = Pipeline::new(
+        filters,
+        actions,
+        "hash".to_string(),
+        Some(classifier_against(&server)),
+    );
+
+    let source = StaticSource;
+    let mut target = CountingTarget::new();
+    pipeline
+        .process(
+            &test_envelope(),
+            account_id,
+            &source,
+            &database,
+            &mut target,
+        )
+        .await
+        .unwrap();
+
+    let conn = database.connection();
+    let tags: Vec<String> = conn
+        .prepare("SELECT tag FROM applied_tags ORDER BY tag")
+        .unwrap()
+        .query_map([], |row| row.get(0))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    assert_eq!(
+        tags,
+        ["cat/test", "cat/work"],
+        "applied_tags must record every tag"
+    );
+
+    let executed: Vec<(String, Option<String>)> = conn
+        .prepare("SELECT action_type, target FROM executed_actions")
+        .unwrap()
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    assert_eq!(
+        executed,
+        [("copy_to".to_string(), Some("test".to_string()))],
+        "executed_actions must record the IMAP action"
+    );
+
+    let filter_types: Vec<String> = conn
+        .prepare("SELECT filter_type FROM filter_matches ORDER BY filter_type")
+        .unwrap()
+        .query_map([], |row| row.get(0))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    assert_eq!(
+        filter_types,
+        ["llm", "sender_in"],
+        "filter_matches must record the native filter and the LLM"
+    );
 }

@@ -23,7 +23,7 @@ use std::collections::BTreeMap;
 use mail_parser::MessageParser;
 
 use crate::actions::resolve::resolve_actions;
-use crate::actions::{ActionTarget, apply_actions};
+use crate::actions::{Action, ActionTarget, apply_actions};
 use crate::config::{FilterRule, TagActions};
 use crate::filters::error::FilterError;
 use crate::filters::{MessageView, NativeFilter};
@@ -31,7 +31,10 @@ use crate::ingest::source::MessageSource;
 use crate::ingest::types::Envelope;
 use crate::llm::classifier::{Classification, Classifier, ClassifyOutcome, MessageContent};
 use crate::pipeline::error::PipelineError;
+use crate::storage::applied_tags::AppliedTag;
 use crate::storage::database::Database;
+use crate::storage::executed_actions::ExecutedAction;
+use crate::storage::filter_matches::FilterMatch;
 use crate::storage::processed_messages::ProcessedMessage;
 use crate::tags::{LLM_ERROR_TAG, classification_tags};
 use crate::webhooks::emitter::WebhookEmitter;
@@ -42,6 +45,9 @@ use crate::webhooks::payload::{PayloadContext, WebhookPayload};
 #[derive(Debug)]
 pub struct CompiledFilter {
     pub filter: NativeFilter,
+    /// The filter family — `sender_in`, `subject_regex`, `list_unsubscribe`
+    /// or `header_match` — recorded in `filter_matches` for traceability.
+    pub filter_type: String,
     pub tag: String,
 }
 
@@ -87,14 +93,17 @@ fn parse_body(eml: &[u8]) -> String {
 pub fn compile_filters(rules: &[FilterRule]) -> Result<Vec<CompiledFilter>, FilterError> {
     let mut compiled = Vec::with_capacity(rules.len());
     for rule in rules {
-        let filter = if let Some(senders) = &rule.sender_in {
-            NativeFilter::sender_in(senders.clone())
+        let (filter, filter_type) = if let Some(senders) = &rule.sender_in {
+            (NativeFilter::sender_in(senders.clone()), "sender_in")
         } else if let Some(pattern) = &rule.subject_regex {
-            NativeFilter::subject_regex(pattern)?
+            (NativeFilter::subject_regex(pattern)?, "subject_regex")
         } else if rule.list_unsubscribe == Some(true) {
-            NativeFilter::list_unsubscribe()
+            (NativeFilter::list_unsubscribe(), "list_unsubscribe")
         } else if let Some(spec) = &rule.header_match {
-            NativeFilter::header_match(&spec.header, &spec.pattern)?
+            (
+                NativeFilter::header_match(&spec.header, &spec.pattern)?,
+                "header_match",
+            )
         } else {
             // Config validation guarantees exactly one filter type; skip
             // defensively rather than panic if that ever changes.
@@ -102,6 +111,7 @@ pub fn compile_filters(rules: &[FilterRule]) -> Result<Vec<CompiledFilter>, Filt
         };
         compiled.push(CompiledFilter {
             filter,
+            filter_type: filter_type.to_string(),
             tag: rule.tag.clone(),
         });
     }
@@ -257,7 +267,7 @@ impl Pipeline {
         }
 
         let actions = resolve_actions(&tags, &self.actions);
-        apply_actions(target, envelope.uid, &actions).await?;
+        let executed = apply_actions(target, envelope.uid, &actions).await?;
 
         database.processed_messages().record(&ProcessedMessage {
             message_id: envelope.message_id.clone(),
@@ -277,6 +287,49 @@ impl Pipeline {
             database.llm_decisions().record(&decision)?;
         }
 
+        // The audit trail (PRD §5.9): which filters fired, which tags were
+        // applied, which IMAP actions ran — replayed by `berger explain` and
+        // the WebUI. Each references processed_messages, recorded above.
+        for compiled in &self.filters {
+            if compiled.filter.matches(&view) {
+                database.filter_matches().record(&FilterMatch {
+                    message_id: envelope.message_id.clone(),
+                    filter_type: compiled.filter_type.clone(),
+                    filter_name: compiled.tag.clone(),
+                    details_json: None,
+                })?;
+            }
+        }
+        if self.classifier.is_some() {
+            database.filter_matches().record(&FilterMatch {
+                message_id: envelope.message_id.clone(),
+                filter_type: "llm".to_string(),
+                filter_name: "llm".to_string(),
+                details_json: None,
+            })?;
+        }
+        for tag in &tags {
+            database.applied_tags().record(&AppliedTag {
+                message_id: envelope.message_id.clone(),
+                tag: tag.clone(),
+            })?;
+        }
+        for action in &executed {
+            let (action_type, action_target) = match action {
+                Action::CopyTo(folder) => ("copy_to", Some(folder.clone())),
+                Action::MoveTo(folder) => ("move_to", Some(folder.clone())),
+                Action::MarkSeen => ("mark_seen", None),
+                Action::MarkFlagged => ("mark_flagged", None),
+            };
+            database.executed_actions().record(&ExecutedAction {
+                message_id: envelope.message_id.clone(),
+                action_type: action_type.to_string(),
+                target: action_target,
+                succeeded: true,
+                error: None,
+            })?;
+        }
+
         // Webhooks (PRD §5.6): emitted last, since webhook_emissions has a
         // foreign key onto the message just recorded above.
         let webhooks_emitted = self
@@ -284,7 +337,7 @@ impl Pipeline {
             .await;
 
         Ok(ProcessOutcome::Processed {
-            actions_applied: actions.len(),
+            actions_applied: executed.len(),
             tags,
             webhooks_emitted,
         })
@@ -467,7 +520,11 @@ mod tests {
         let compiled = compile_filters(&rules).unwrap();
         assert_eq!(compiled.len(), 4);
         assert_eq!(compiled[0].tag, "notif/github");
+        assert_eq!(compiled[0].filter_type, "sender_in");
+        assert_eq!(compiled[1].filter_type, "subject_regex");
+        assert_eq!(compiled[2].filter_type, "list_unsubscribe");
         assert_eq!(compiled[3].tag, "spam");
+        assert_eq!(compiled[3].filter_type, "header_match");
     }
 
     #[test]
@@ -481,10 +538,12 @@ mod tests {
         let filters = vec![
             CompiledFilter {
                 filter: NativeFilter::sender_in(vec!["github.com".to_string()]),
+                filter_type: "sender_in".to_string(),
                 tag: "notif/github".to_string(),
             },
             CompiledFilter {
                 filter: NativeFilter::subject_regex("(?i)facture").unwrap(),
+                filter_type: "subject_regex".to_string(),
                 tag: "cat/finance".to_string(),
             },
         ];
@@ -501,10 +560,12 @@ mod tests {
         let filters = vec![
             CompiledFilter {
                 filter: NativeFilter::sender_in(vec!["github.com".to_string()]),
+                filter_type: "sender_in".to_string(),
                 tag: "notif".to_string(),
             },
             CompiledFilter {
                 filter: NativeFilter::subject_regex("(?i)build").unwrap(),
+                filter_type: "subject_regex".to_string(),
                 tag: "notif".to_string(),
             },
         ];

@@ -18,8 +18,11 @@
 //! and the table repositories.
 
 pub mod accounts;
+pub mod applied_tags;
 pub mod database;
 pub mod error;
+pub mod executed_actions;
+pub mod filter_matches;
 pub mod llm_decisions;
 pub mod processed_messages;
 pub mod webhook_emissions;
