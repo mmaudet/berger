@@ -1,0 +1,40 @@
+# cargo-deny — license and security gate for Berger.
+#
+# Berger ships under AGPL-3.0-or-later. Every dependency must carry a licence
+# compatible with the AGPL: permissive only (MIT, Apache-2.0, BSD, ISC, ...).
+# Strong copyleft (GPL/AGPL) on a dependency and proprietary licences are
+# rejected — see CLAUDE.md §3.4. Berger's own AGPL licence is accepted only
+# for the `berger` crate itself, through the explicit exception below.
+
+[advisories]
+yanked = "deny"
+ignore = []
+
+[licenses]
+confidence-threshold = 0.8
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "Unicode-3.0",
+    # webpki-roots ships the Mozilla CA set as data; CDLA-Permissive-2.0 is a
+    # permissive data licence with no copyleft, compatible with the AGPL.
+    "CDLA-Permissive-2.0",
+]
+
+# Berger itself is AGPL-3.0-or-later. This is intentional and scoped to the
+# application crate only — an AGPL *dependency* would still be rejected.
+[[licenses.exceptions]]
+name = "berger"
+allow = ["AGPL-3.0-or-later"]
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
