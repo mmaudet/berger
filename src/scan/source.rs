@@ -39,6 +39,13 @@ pub trait ReadOnlyMessageSource {
         &self,
         request: EmailSearchRequest,
     ) -> impl Future<Output = Result<DataPage<Envelope>, IngestError>> + Send;
+
+    /// Downloads the raw RFC 822 bytes of one message.
+    fn download_message(
+        &self,
+        account_id: &str,
+        envelope_id: &str,
+    ) -> impl Future<Output = Result<Vec<u8>, IngestError>> + Send;
 }
 
 impl<T: MessageSource> ReadOnlyMessageSource for T {
@@ -47,6 +54,14 @@ impl<T: MessageSource> ReadOnlyMessageSource for T {
         request: EmailSearchRequest,
     ) -> impl Future<Output = Result<DataPage<Envelope>, IngestError>> + Send {
         MessageSource::search_messages(self, request)
+    }
+
+    fn download_message(
+        &self,
+        account_id: &str,
+        envelope_id: &str,
+    ) -> impl Future<Output = Result<Vec<u8>, IngestError>> + Send {
+        MessageSource::download_message(self, account_id, envelope_id)
     }
 }
 
@@ -226,5 +241,14 @@ mod tests {
         let envelopes = fetch_window(&source, &[], 0).await.unwrap();
         assert!(envelopes.is_empty());
         assert_eq!(source.requests.lock().unwrap().len(), 0);
+    }
+
+    #[tokio::test]
+    async fn download_message_is_reachable_through_the_read_only_trait() {
+        let source = FakeSource::new(Vec::new());
+        let eml = ReadOnlyMessageSource::download_message(&source, "1", "e1")
+            .await
+            .unwrap();
+        assert!(eml.is_empty());
     }
 }
