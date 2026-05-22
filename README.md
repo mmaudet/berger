@@ -109,6 +109,8 @@ LLM section and three webhooks.
 The full reference documentation:
 
 - [`docs/yaml.md`](docs/yaml.md) — every section and field of `berger.yaml`.
+- [`docs/scan.md`](docs/scan.md) — the read-only `berger scan` analysis and
+  the configuration it suggests.
 - [`docs/webhooks.md`](docs/webhooks.md) — the canonical webhook payload and
   example n8n workflows.
 - [`docs/bichon-setup.md`](docs/bichon-setup.md) — configuring the upstream
