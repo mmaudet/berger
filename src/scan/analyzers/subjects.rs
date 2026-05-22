@@ -14,14 +14,4 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-//! Per-dimension analyzers (PRD v1.1 §4.2): each module computes one
-//! family of statistics over the scanned envelopes.
-
-pub mod language;
-pub mod lists;
-pub mod newsletters;
-pub mod notifications;
-pub mod senders;
-pub mod spam;
-pub mod subjects;
-pub mod volume;
+//! Subject n-gram analysis: dimension 8 of the scan (PRD v1.1 §4.2).
