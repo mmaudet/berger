@@ -26,7 +26,11 @@ webpki-roots = "1.0.7"
 clap = { version = "4.6.1", features = ["derive"] }
 anyhow = "1.0.102"
 tracing-subscriber = { version = "0.3.23", features = ["json", "env-filter"] }
+axum = "0.8.9"
+askama = "0.16.0"
+askama_web = { version = "0.16.0", default-features = false, features = ["derive", "axum-0.8"] }
 
 [dev-dependencies]
 testcontainers = "0.27.3"
 wiremock = "0.6"
+tower = { version = "0.5", features = ["util"] }
