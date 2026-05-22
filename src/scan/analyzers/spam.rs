@@ -32,7 +32,7 @@ const HIGH_SCORE_THRESHOLD: f64 = 5.0;
 pub struct SpamSummary {
     /// Messages carrying `X-Spam-Flag: YES` (case-insensitive).
     pub flagged: usize,
-    /// Messages whose `X-Spam-Score` reaches [`HIGH_SCORE_THRESHOLD`].
+    /// Messages whose `X-Spam-Score` reaches the spam threshold (5.0).
     pub high_score: usize,
     /// Messages whose `Authentication-Results` reports `dmarc=fail`.
     pub dmarc_failures: usize,
