@@ -71,7 +71,7 @@ Unless a webhook declares a `template`, Berger POSTs this JSON, with
 ```json
 {
   "event": "berger.tag_applied",
-  "berger_version": "0.0.1",
+  "berger_version": "0.1.0",
   "timestamp": "2026-05-19T08:32:15Z",
   "account": "michel-marie@linagora.com",
   "tags": ["needs-reply", "cat/work"],

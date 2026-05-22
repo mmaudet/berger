@@ -34,8 +34,9 @@ the classification to tags, then the per-tag IMAP actions and webhooks.
 
 ## Status
 
-Berger is at **v0** and under active development toward the v0.1.0 release.
-The functional and technical specification is [`docs/PRD.md`](docs/PRD.md).
+Berger **v0.1.0** is the first release. The functional and technical
+specification is [`docs/PRD.md`](docs/PRD.md); release notes are in the
+[changelog](CHANGELOG.md).
 
 ## Quickstart
 
