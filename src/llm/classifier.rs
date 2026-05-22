@@ -115,8 +115,8 @@ impl Classifier {
         }
 
         let started = std::time::Instant::now();
-        let response = match self.client.complete(&system, &user).await {
-            Ok(text) => text,
+        let completion = match self.client.complete(&system, &user).await {
+            Ok(completion) => completion,
             Err(error) => {
                 tracing::warn!(
                     message_id = %message.message_id,
@@ -128,7 +128,7 @@ impl Classifier {
         };
         let latency_ms = i64::try_from(started.elapsed().as_millis()).unwrap_or(i64::MAX);
 
-        let json = extract_json(&response);
+        let json = extract_json(&completion.content);
         let Ok(classification) = serde_json::from_str::<Classification>(json) else {
             tracing::warn!(
                 message_id = %message.message_id,
@@ -143,8 +143,8 @@ impl Classifier {
             prompt_hash,
             prompt_text: format!("{system}\n\n{user}"),
             response_json: json.to_string(),
-            tokens_input: None,
-            tokens_output: None,
+            tokens_input: completion.tokens_input,
+            tokens_output: completion.tokens_output,
             latency_ms: Some(latency_ms),
             cost_usd: None,
         };
@@ -276,6 +276,35 @@ mod tests {
             }
             ClassifyOutcome::Failed => panic!("expected a classification"),
         }
+    }
+
+    #[tokio::test]
+    async fn classify_records_the_token_usage_in_the_decision() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "choices": [{"message": {"role": "assistant", "content":
+                    r#"{"category":"work","needs_reply":false,"priority":2}"#}}],
+                "usage": {"prompt_tokens": 200, "completion_tokens": 18}
+            })))
+            .mount(&server)
+            .await;
+        let db = db_with_message("<m@x>");
+
+        let outcome = classifier_for(&server)
+            .classify(&db.llm_decisions(), &sample_message("<m@x>"))
+            .await
+            .unwrap();
+
+        let ClassifyOutcome::Classified {
+            decision: Some(decision),
+            ..
+        } = outcome
+        else {
+            panic!("a cache miss must yield a decision");
+        };
+        assert_eq!(decision.tokens_input, Some(200));
+        assert_eq!(decision.tokens_output, Some(18));
     }
 
     #[tokio::test]

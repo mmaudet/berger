@@ -41,12 +41,37 @@ struct ChatRequest<'a> {
 #[derive(Debug, Deserialize)]
 struct ChatResponse {
     choices: Vec<ChatChoice>,
+    /// Token usage, when the API reports it. Absent on endpoints that do
+    /// not return an OpenAI-compatible `usage` block.
+    #[serde(default)]
+    usage: Option<Usage>,
 }
 
 /// One completion choice.
 #[derive(Debug, Deserialize)]
 struct ChatChoice {
     message: ChatMessage,
+}
+
+/// The token-usage block of a chat-completion response.
+#[derive(Debug, Deserialize)]
+struct Usage {
+    #[serde(default)]
+    prompt_tokens: Option<i64>,
+    #[serde(default)]
+    completion_tokens: Option<i64>,
+}
+
+/// An LLM completion: the assistant's reply and the token usage the API
+/// reported, when it reported any.
+#[derive(Debug, Clone)]
+pub struct Completion {
+    /// The assistant's reply text.
+    pub content: String,
+    /// Prompt tokens billed, when the API reported `usage`.
+    pub tokens_input: Option<i64>,
+    /// Completion tokens billed, when the API reported `usage`.
+    pub tokens_output: Option<i64>,
 }
 
 /// A client for an OpenAI-compatible chat-completions API (Mistral,
@@ -101,12 +126,13 @@ impl LlmClient {
         })
     }
 
-    /// Sends a system + user prompt and returns the assistant's reply.
+    /// Sends a system + user prompt and returns the assistant's reply,
+    /// together with the token usage the API reported (when it reports any).
     ///
     /// # Errors
     /// Returns [`LlmError`] on a transport failure, a non-success status,
     /// an undecodable body, or a response carrying no completion.
-    pub async fn complete(&self, system: &str, user: &str) -> Result<String, LlmError> {
+    pub async fn complete(&self, system: &str, user: &str) -> Result<Completion, LlmError> {
         let messages = [
             ChatMessage {
                 role: "system".to_string(),
@@ -134,12 +160,22 @@ impl LlmClient {
         }
         let parsed: ChatResponse =
             serde_json::from_str(&body).map_err(|error| LlmError::Decode(error.to_string()))?;
-        parsed
+        let usage = parsed.usage;
+        let content = parsed
             .choices
             .into_iter()
             .next()
             .map(|choice| choice.message.content)
-            .ok_or(LlmError::EmptyResponse)
+            .ok_or(LlmError::EmptyResponse)?;
+        let (tokens_input, tokens_output) = match usage {
+            Some(usage) => (usage.prompt_tokens, usage.completion_tokens),
+            None => (None, None),
+        };
+        Ok(Completion {
+            content,
+            tokens_input,
+            tokens_output,
+        })
     }
 }
 
@@ -176,7 +212,48 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(reply, "the reply");
+        assert_eq!(reply.content, "the reply");
+    }
+
+    #[tokio::test]
+    async fn complete_returns_the_token_usage() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v1/chat/completions"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "choices": [{"message": {"role": "assistant", "content": "ok"}}],
+                "usage": {"prompt_tokens": 123, "completion_tokens": 45}
+            })))
+            .mount(&server)
+            .await;
+
+        let endpoint = format!("{}/v1/chat/completions", server.uri());
+        let client = LlmClient::new(&endpoint, "m", None).unwrap();
+        let completion = client.complete("s", "u").await.unwrap();
+
+        assert_eq!(completion.content, "ok");
+        assert_eq!(completion.tokens_input, Some(123));
+        assert_eq!(completion.tokens_output, Some(45));
+    }
+
+    #[tokio::test]
+    async fn complete_tolerates_a_response_without_usage() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v1/chat/completions"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "choices": [{"message": {"role": "assistant", "content": "ok"}}]
+            })))
+            .mount(&server)
+            .await;
+
+        let endpoint = format!("{}/v1/chat/completions", server.uri());
+        let client = LlmClient::new(&endpoint, "m", None).unwrap();
+        let completion = client.complete("s", "u").await.unwrap();
+
+        assert_eq!(completion.content, "ok");
+        assert_eq!(completion.tokens_input, None);
+        assert_eq!(completion.tokens_output, None);
     }
 
     #[tokio::test]
