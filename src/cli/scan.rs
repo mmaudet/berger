@@ -171,6 +171,7 @@ fn render_summary(report: &ScanReport, days: u32) -> String {
 mod tests {
     use super::*;
     use crate::scan::analyzers::senders::{BidirectionalContact, DomainCount, SenderCount};
+    use crate::scan::analyzers::spam::SpamSummary;
 
     const TWO_ACCOUNTS: &str = r#"
 bichon:
@@ -201,6 +202,10 @@ accounts:
             top_senders: Vec::new(),
             top_domains: Vec::new(),
             bidirectional: Vec::new(),
+            newsletters: Vec::new(),
+            mailing_lists: Vec::new(),
+            notification_services: Vec::new(),
+            spam: SpamSummary::default(),
         }
     }
 

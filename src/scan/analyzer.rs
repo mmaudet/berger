@@ -19,7 +19,11 @@
 //! [`ScanReport`].
 
 use crate::ingest::types::Envelope;
+use crate::scan::analyzers::lists::{self, MailingList};
+use crate::scan::analyzers::newsletters::{self, NewsletterDomain};
+use crate::scan::analyzers::notifications::{self, NotificationService};
 use crate::scan::analyzers::senders::{self, BidirectionalContact, DomainCount, SenderCount};
+use crate::scan::analyzers::spam::{self, SpamSummary};
 use crate::scan::folders::{FolderClass, classify_folder};
 use crate::scan::headers::ScanHeaders;
 
@@ -49,6 +53,14 @@ pub struct ScanReport {
     pub top_domains: Vec<DomainCount>,
     /// Dimension 2: the bidirectional contacts.
     pub bidirectional: Vec<BidirectionalContact>,
+    /// Dimension 4: newsletter senders grouped by domain.
+    pub newsletters: Vec<NewsletterDomain>,
+    /// Dimension 5: the active mailing lists.
+    pub mailing_lists: Vec<MailingList>,
+    /// Dimension 6: the notification services in use.
+    pub notification_services: Vec<NotificationService>,
+    /// Dimension 7: the observed spam-signal summary.
+    pub spam: SpamSummary,
 }
 
 /// Splits fetched envelopes by folder into `(inbox, sent)`: the INBOX
@@ -77,6 +89,10 @@ pub fn analyze(inbox: &[ScannedMessage], sent: &[&Envelope]) -> ScanReport {
         top_senders: senders::top_senders(&inbox_envelopes),
         top_domains: senders::top_domains(&inbox_envelopes),
         bidirectional: senders::bidirectional(&inbox_envelopes, sent),
+        newsletters: newsletters::detect_newsletters(inbox),
+        mailing_lists: lists::detect_mailing_lists(inbox),
+        notification_services: notifications::detect_notification_services(inbox),
+        spam: spam::analyze_spam(inbox),
     }
 }
 
@@ -201,5 +217,47 @@ mod tests {
         assert!(report.top_senders.is_empty());
         assert!(report.top_domains.is_empty());
         assert!(report.bidirectional.is_empty());
+    }
+
+    #[test]
+    fn analyze_runs_the_header_based_dimensions() {
+        let newsletter_env = envelope("INBOX", "news@list.test", &[]);
+        let notification_env = envelope("INBOX", "noreply@service.test", &[]);
+        let spam_env = envelope("INBOX", "spammer@bad.test", &[]);
+        let inbox = [
+            ScannedMessage {
+                envelope: &newsletter_env,
+                headers: ScanHeaders {
+                    list_unsubscribe: true,
+                    list_id: Some("<news.list.test>".to_string()),
+                    ..ScanHeaders::default()
+                },
+            },
+            ScannedMessage {
+                envelope: &notification_env,
+                headers: ScanHeaders::default(),
+            },
+            ScannedMessage {
+                envelope: &spam_env,
+                headers: ScanHeaders {
+                    x_spam_flag: Some("YES".to_string()),
+                    ..ScanHeaders::default()
+                },
+            },
+        ];
+        let report = analyze(&inbox, &[]);
+        assert!(
+            !report.newsletters.is_empty(),
+            "dimension 4 should be wired"
+        );
+        assert!(
+            !report.mailing_lists.is_empty(),
+            "dimension 5 should be wired"
+        );
+        assert!(
+            !report.notification_services.is_empty(),
+            "dimension 6 should be wired"
+        );
+        assert_eq!(report.spam.flagged, 1, "dimension 7 should be wired");
     }
 }
