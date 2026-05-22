@@ -1,0 +1,183 @@
+# Berger — reference configuration.
+#
+# Copy this file to `berger.yaml` and edit it for your setup. Every section
+# is documented in full in docs/yaml.md.
+#
+# Secrets (API tokens, IMAP passwords) MUST NOT be written in clear text.
+# Use ${VAR} placeholders: Berger substitutes them from the process
+# environment at startup. With Docker, put the values in a gitignored .env
+# file; under systemd, in an EnvironmentFile. An unset ${VAR} is a fatal
+# startup error — Berger never falls back to an empty value.
+
+# --- Bichon -----------------------------------------------------------------
+# The upstream archiver Berger reads from. Berger never touches IMAP for
+# reading — every message comes through Bichon's REST API. See
+# docs/bichon-setup.md for how to configure Bichon itself.
+bichon:
+  base_url: "https://bichon.example.com"   # no trailing slash needed
+  api_token: "${BICHON_API_KEY}"           # Bearer token for Bichon's API
+
+# --- Database ---------------------------------------------------------------
+# The SQLite sidecar — Berger's only state. Created on first run, opened in
+# WAL mode. Relative paths resolve against the working directory.
+database:
+  path: "berger.db"
+
+# --- Accounts ---------------------------------------------------------------
+# The mail accounts to triage. At least one is required; Berger handles
+# several. `bichon_account_id` is the numeric id Bichon assigns the account
+# (visible in Bichon's account list). The `imap` block is where Berger
+# writes its triage actions back — it is used for writeback only, never for
+# reading.
+accounts:
+  - name: "LINAGORA"                       # a label, unique across accounts
+    bichon_account_id: "8525922389589073"  # numeric, from Bichon
+    imap:
+      host: "imap.linagora.com"
+      port: 993                            # optional, defaults to 993 (IMAPS)
+      user: "you@linagora.com"
+      password: "${LINAGORA_IMAP_PASSWORD}"
+
+  - name: "Gmail"
+    bichon_account_id: "1417038252461348"
+    imap:
+      host: "imap.gmail.com"
+      user: "you@gmail.com"
+      password: "${GMAIL_IMAP_PASSWORD}"
+
+# --- Native filters ---------------------------------------------------------
+# Deterministic, no-LLM rules (PRD §5.2). Each rule declares exactly one of
+# the four filter types and the `tag` it emits when it matches. A message
+# keeps every tag it matches — there is no precedence between rules — so it
+# can end up with several tags, and thus in several folders.
+filters:
+  # sender_in — matches a full address or a bare domain (case-insensitive).
+  - sender_in: ["notifications@github.com", "github.com"]
+    tag: notif/github
+
+  # subject_regex — a Rust regex matched against the Subject header.
+  # `(?i)` makes it case-insensitive.
+  - subject_regex: "(?i)\\b(facture|invoice|reçu)\\b"
+    tag: cat/finance
+
+  # list_unsubscribe — matches when the message carries a List-Unsubscribe
+  # header (RFC 2369): the reliable signal of bulk / automated mail.
+  - list_unsubscribe: true
+    tag: bulk
+
+  # header_match — a regex matched against a named header's value.
+  - header_match:
+      header: "X-Spam-Flag"
+      pattern: "(?i)yes"
+    tag: spam-confirme
+
+# --- LLM classifier ---------------------------------------------------------
+# An OpenAI-compatible chat-completions endpoint (PRD §5.3): Mistral, Ollama,
+# or anything that speaks the same API. Optional — omit the whole section to
+# run on native filters alone.
+#
+# The classifier returns {category, needs_reply, priority}. Berger maps that
+# to tags (PRD §5.4): cat/<category> always, plus `needs-reply` when a reply
+# is expected and `priority-high` when priority >= 4. If the call fails, the
+# message is tagged `llm_error` and triage continues.
+llm:
+  endpoint: "https://api.mistral.ai/v1/chat/completions"
+  model: "mistral-small-latest"            # or e.g. "gemma3:12b" on Ollama
+  api_key: "${MISTRAL_API_KEY}"            # omit for a local, unauthenticated endpoint
+  # The category vocabulary offered to the model. When set, the model is
+  # asked to pick exactly one of these; when omitted, it invents a label.
+  # A fixed list keeps your cat/* folders stable.
+  categories:
+    - work
+    - perso
+    - newsletter
+    - notification
+    - finance
+    - spam
+
+# --- Actions ----------------------------------------------------------------
+# What Berger does on the IMAP server for each tag (PRD §5.5). A tag with no
+# entry here is recorded in the sidecar but the message is left untouched.
+# Five primitives, all optional, freely combined per tag:
+#   copy_to: <folder>     IMAP COPY into Berger/<folder> (non-destructive)
+#   move_to: <folder>     COPY into Berger/<folder>, then remove from INBOX
+#   mark_seen: true       set the \Seen flag
+#   mark_flagged: true    set the \Flagged flag (the star in mail clients)
+#   webhook: <name>       POST the canonical event to a named webhook
+# Berger prefixes every folder with `Berger/` and creates it if missing.
+actions:
+  # Native-filter tags.
+  notif/github:
+    copy_to: "notifs/github"
+    mark_seen: true
+
+  cat/finance:
+    copy_to: "finance"
+
+  bulk:
+    move_to: "bulk"          # move_to empties bulk mail out of the INBOX
+    mark_seen: true
+
+  spam-confirme:
+    move_to: "junk"
+    mark_seen: true
+
+  # LLM-derived tags (PRD §5.4).
+  cat/work:
+    copy_to: "cat/work"
+
+  cat/perso:
+    copy_to: "cat/perso"
+
+  cat/newsletter:
+    move_to: "newsletters"
+    mark_seen: true
+
+  needs-reply:
+    copy_to: "a-repondre"
+    mark_flagged: true
+    webhook: linatwin-draft   # ask an external workflow to draft a reply
+
+  priority-high:
+    mark_flagged: true
+    webhook: hermes-push-urgent
+
+  # The llm_error tag is applied when the classifier fails — file it so
+  # those messages are easy to find and the prompt can be tuned.
+  llm_error:
+    copy_to: "llm-errors"
+
+# --- Webhooks ---------------------------------------------------------------
+# Named HTTP endpoints a tag's `webhook:` action POSTs to (PRD §5.6). Every
+# webhook receives the same canonical `berger.tag_applied` payload unless it
+# declares a custom Handlebars `template`. Delivery is fire-and-forget with
+# a bounded retry budget. The full payload contract is in docs/webhooks.md.
+webhooks:
+  # 1. Draft generation — a workflow that calls an LLM and IMAP-APPENDs a
+  #    reply into the Drafts folder.
+  - name: linatwin-draft
+    url: "https://n8n.example.com/webhook/linatwin/draft"
+    method: POST                           # optional, defaults to POST
+    headers:
+      Authorization: "Bearer ${HERMES_TOKEN}"
+    retry:
+      max_attempts: 3                      # total tries, including the first
+      backoff: exponential                 # 1s, 4s, 16s — or `fixed` (1s)
+
+  # 2. Urgent push notification. `when:` restricts the webhook to messages
+  #    carrying at least one of the listed tags, even if other tags also
+  #    reference it.
+  - name: hermes-push-urgent
+    url: "https://hermes.example.com/webhook/push/urgent"
+    when:
+      - priority-high
+      - cat/urgent
+
+  # 3. Delegation forward, with a custom payload. When `template` is set,
+  #    Berger renders it with Handlebars against the canonical payload and
+  #    POSTs the result instead of the default JSON.
+  - name: hermes-forward-christelle
+    url: "https://n8n.example.com/webhook/berger/delegate"
+    template: |
+      {"subject": "{{message.subject}}", "from": "{{message.from.email}}",
+       "bichon": "{{bichon_message_uri}}"}
